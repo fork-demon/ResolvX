@@ -1,0 +1,63 @@
+# Core Framework Dependencies
+aiohttp==3.8.5
+pydantic==2.5.0
+asyncio-mqtt==0.13.0
+uvicorn==0.24.0
+fastapi==0.104.1
+
+# LangGraph and LangChain
+langgraph==0.0.20
+langchain==0.0.350
+langchain-community==0.0.10
+langchain-core==0.1.0
+
+# LLM and AI
+openai==1.3.0
+anthropic==0.7.0
+cohere==4.37.0
+
+# RAG and Embeddings
+llama-index==0.9.0
+sentence-transformers==2.2.2
+faiss-cpu==1.7.4
+chromadb==0.4.15
+
+# Memory and Vector Stores
+redis==5.0.1
+pinecone-client==2.2.4
+
+# Observability
+langsmith==0.0.69
+langfuse==2.0.0
+prometheus-client==0.19.0
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+opentelemetry-exporter-jaeger==1.22.0
+
+# Database
+sqlalchemy==2.0.23
+alembic==1.12.1
+psycopg2-binary==2.9.9
+
+# Configuration and Utilities
+pyyaml==6.0.1
+python-dotenv==1.0.0
+click==8.1.7
+rich==13.7.0
+apscheduler==3.10.4
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+behave==1.2.6
+
+# Development
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+
+# Runbook Management
+scikit-learn==1.3.2
+numpy==1.24.3
+pandas==2.1.4

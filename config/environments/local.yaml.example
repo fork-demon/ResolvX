@@ -1,0 +1,75 @@
+# Local Development Environment Configuration
+# Copy this file to local.yaml and customize for your local setup
+
+# Organization settings
+org_name: "your-org"
+
+# Gateway URLs for local development
+central_llm_gateway_url: "http://localhost:8000"
+central_mcp_gateway_url: "http://localhost:8001"
+
+# Default settings
+default_agent_version: "1.0.0"
+default_embedding_model: "text-embedding-ada-002"
+
+# Confidence thresholds for different agents
+default_confidence_threshold_triage: 0.8
+default_confidence_threshold_metrics: 0.7
+default_confidence_threshold_poller: 0.9
+
+# Local development overrides
+debug: true
+environment: "local"
+
+# Memory backend for local development
+memory:
+  backend: "mock"  # Use mock backend for local development
+  mock:
+    persist: false
+    initial_data: []
+
+# Observability for local development
+observability:
+  backend: "console"
+  console:
+    level: "DEBUG"
+    format: "structured"
+    include_timestamps: true
+
+# RAG backend for local development
+rag:
+  backend: "mock"
+  mock:
+    responses:
+      - query: "test"
+        response: "This is a test response from mock RAG"
+
+# Local gateway settings
+gateway:
+  mcp_gateway:
+    url: "http://localhost:8001"
+    timeout: 10
+    retry_attempts: 1
+    fallback_mode: "mock"
+
+  llm_gateway:
+    url: "http://localhost:8000"
+    default_model: "mock-gpt-4"
+    timeout: 30
+
+# Enable all agents for local testing
+agents:
+  triage:
+    enabled: true
+    timeout: 30
+  poller:
+    enabled: true
+    timeout: 30
+    custom_settings:
+      schedule: "*/1 * * * *"  # Every minute for testing
+  metrics:
+    enabled: true
+    timeout: 30
+  supervisor:
+    enabled: true
+    timeout: 30

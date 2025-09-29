@@ -1,0 +1,444 @@
+# Golden Agent Framework Configuration
+# This file contains the main configuration for all agents and framework components.
+# Variables in {BRACKETS} are automatically substituted from environment variables.
+
+# Framework metadata
+version: "0.1.0"
+environment: "local"
+debug: true
+
+# Memory configuration - pluggable backend system
+memory:
+  backend: "faiss"  # Options: faiss, redis, pinecone, mock
+
+  faiss:
+    index_path: "./data/faiss_index"
+    embedding_model: "{DEFAULT_EMBEDDING_MODEL}"
+    dimension: 1536
+    index_type: "IndexFlatL2"
+
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: null
+
+  pinecone:
+    api_key: null  # Set via environment variable
+    environment: "us-west1-gcp"
+    index_name: "golden-agents"
+
+  mock:
+    persist: false
+    initial_data: []
+
+# Observability configuration - pluggable monitoring system
+observability:
+  backend: "langsmith"  # Options: langsmith, langfuse, console
+
+  langsmith:
+    api_url: "https://api.smith.langchain.com"
+    api_key: "{LANGSMITH_API_KEY}"
+    project_name: "{ORG_NAME}-agents"
+    environment: "{ENVIRONMENT}"
+    enabled: true
+
+  langfuse:
+    public_key: "{LANGFUSE_PUBLIC_KEY}"
+    secret_key: "{LANGFUSE_SECRET_KEY}"
+    host: "https://cloud.langfuse.com"
+    project_name: "{ORG_NAME}-agents"
+    environment: "{ENVIRONMENT}"
+    enabled: false
+
+  console:
+    level: "INFO"
+    format: "structured"
+    include_timestamps: true
+
+# RAG (Retrieval Augmented Generation) configuration
+rag:
+  backend: "local_kb"  # set to local_kb to index kb/*.md in-repo
+  local_kb:
+    knowledge_dir: "kb"
+    model_name: "all-MiniLM-L6-v2"
+
+# Runbook configuration - team-specific runbook management
+# runbooks removed in minimal repo
+
+# Gateway configuration for MCP and LLM integration
+gateway:
+  # MCP (Model Context Protocol) Gateway
+  mcp_gateway:
+    url: "{CENTRAL_MCP_GATEWAY_URL}"
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 1.0
+    fallback_mode: "local"  # Options: local, error, mock
+
+  # LLM Gateway
+  llm_gateway:
+    url: "{CENTRAL_LLM_GATEWAY_URL}"
+    default_model: "gpt-4"
+    timeout: 60
+    retry_attempts: 2
+
+  # Tool registry - maps tool names to their implementations
+  tools:
+    # MCP-based tools (via central gateway)
+    splunk_search:
+      type: "mcp"
+      server: "splunk-mcp-server"
+      description: "Search Splunk logs and metrics"
+
+    zendesk_ticket_create:
+      type: "mcp"
+      server: "zendesk-mcp-server"
+      description: "Create and manage Zendesk tickets"
+
+    newrelic_metrics:
+      type: "mcp"
+      server: "newrelic-mcp-server"
+      description: "Query New Relic metrics and alerts"
+
+    vault_secret_read:
+      type: "mcp"
+      server: "vault-mcp-server"
+      description: "Read secrets from HashiCorp Vault"
+
+    # Local custom tools
+    product_lookup:
+      type: "local"
+      module: "core.tools.team_tools:product_lookup"
+      description: "Lookup product by GTIN/TPNB"
+
+    location_lookup:
+      type: "local"
+      module: "core.tools.team_tools:location_lookup"
+      description: "Resolve location cluster to stores"
+
+    # Optional local mocks for dev
+    splunk_search_mock:
+      type: "local"
+      module: "core.mocks.tools:splunk_search_mock"
+      description: "Mock Splunk search"
+    newrelic_metrics_mock:
+      type: "local"
+      module: "core.mocks.tools:newrelic_metrics_mock"
+      description: "Mock New Relic metrics"
+    zendesk_poll_queue_mock:
+      type: "local"
+      module: "core.mocks.tools:zendesk_poll_queue_mock"
+      description: "Mock Zendesk queue polling"
+
+# Agent configurations - each agent has its own settings
+agents:
+  # Triage Agent - intelligently routes and prioritizes tasks
+  triage:
+    enabled: true
+    model: "{CENTRAL_LLM_GATEWAY_URL}/v1/chat/completions"
+    type: "triage"
+    description: "Intelligently routes and prioritizes tasks"
+    team: "operations"
+
+    # Prompt configuration - Core to agent behavior
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/triage/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+      
+      runtime_prompts:
+        incident_analysis:
+          type: "file"
+          path: "prompts/triage/incident_analysis.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+        
+        routing_decision:
+          type: "file"
+          path: "prompts/triage/routing_decision.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+        
+        escalation_check:
+          type: "file"
+          path: "prompts/triage/escalation_check.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+
+    # Resource ingestion configuration (minimal)
+    resources:
+      knowledge_base:
+        - type: "file"
+          path: "resources/triage/incident_types.yaml"
+          description: "Incident type definitions and handling procedures"
+        - type: "file"
+          path: "resources/triage/glossary.yaml"
+          description: "Business domain glossary for entity extraction and disambiguation"
+
+    # MCP Server configuration
+    mcp_servers:
+      - team: "operations"
+        port: 8086
+        tools: ["incident_analysis", "routing_decision", "escalation_check"]
+
+    tools:
+      - splunk_search
+      - zendesk_ticket_create
+      - newrelic_metrics
+
+    confidence_threshold: {DEFAULT_CONFIDENCE_THRESHOLDS.triage}
+    max_iterations: 5
+    timeout: 120
+
+  # Poller Agent - monitors systems and endpoints on schedule
+  poller:
+    enabled: true
+    model: "{CENTRAL_LLM_GATEWAY_URL}/v1/chat/completions"
+    type: "poller"
+    description: "Zendesk queue poller for monitoring and processing tickets"
+    team: "operations"
+    
+    # Scheduler: run every 30 minutes (cron format: minute hour day month weekday)
+    schedule: "*/30 * * * *"
+    
+    # Poller settings
+    max_concurrent_polls: 5
+    default_poll_interval: 30
+    max_results_history: 1000
+    auto_assign_enabled: false
+    
+    # Zendesk configuration: single team, multiple queues
+    zendesk:
+      auth:
+        # Choose one: email+api_token OR username+password. subdomain optional.
+        email: "{ZENDESK_SERVICE_EMAIL}"
+        api_token: "{ZENDESK_API_TOKEN}"
+        # username: "{ZENDESK_USERNAME}"
+        # password: "{ZENDESK_PASSWORD}"
+        # subdomain: "{ZENDESK_SUBDOMAIN}"
+        # base_url: "{ZENDESK_BASE_URL}"
+      queues:
+        - name: "engineering-support"
+          poll_interval: 30
+          max_tickets_per_poll: 50
+          priority_threshold: "normal"
+          auto_assign: false
+          tags: ["poller-processed", "engineering"]
+        - name: "devops-support"
+          poll_interval: 45
+          max_tickets_per_poll: 30
+          priority_threshold: "normal"
+          auto_assign: true
+          assignee_id: "{ZENDESK_DEVOPS_ASSIGNEE_ID}"
+          tags: ["poller-processed", "devops"]
+        - name: "security-incidents"
+          poll_interval: 15
+          max_tickets_per_poll: 20
+          priority_threshold: "low"
+          auto_assign: true
+          assignee_id: "{ZENDESK_SECURITY_ASSIGNEE_ID}"
+          tags: ["poller-processed", "security", "incident"]
+        - name: "operations-support"
+          poll_interval: 60
+          max_tickets_per_poll: 100
+          priority_threshold: "normal"
+          auto_assign: false
+          tags: ["poller-processed", "operations"]
+
+    # Prompt configuration - Minimal poll-and-forward
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/poller/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+
+    # No resources for minimal poller
+
+    # MCP Server configuration
+    mcp_servers:
+      - team: "operations"
+        port: 8088
+        tools: ["poll_queue", "get_ticket_details", "update_ticket_status", "assign_ticket", "get_queue_stats"]
+
+    tools:
+      - splunk_search
+      - newrelic_metrics
+      - custom_metrics
+
+    confidence_threshold: {DEFAULT_CONFIDENCE_THRESHOLDS.poller}
+    max_iterations: 3
+    timeout: 60
+
+    # Poller-specific settings
+    custom_settings:
+      # Reserved for future HTTP targets if needed
+
+  # Metrics Agent - collects and analyzes performance metrics
+  # Memory Agent - historical ticket lookup and insertion
+  memory:
+    enabled: true
+    type: "memory"
+    description: "Search historical tickets and forward related to supervisor; else store"
+    team: "operations"
+
+    # Behavior
+    namespace_prefix: "tickets"
+    search_limit: 10
+    search_threshold: 0.7
+    forward_mode: "return"  # or "invoke"
+    embedding_model: "all-MiniLM-L6-v2"  # optional; falls back to text similarity if unavailable
+
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/memory/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+
+  # Splunk Agent - queries logs/metrics
+  splunk:
+    enabled: true
+    type: "splunk"
+    description: "Executes Splunk queries based on ticket context"
+    team: "operations"
+    knowledge_dir: "knowledge/splunk"
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/splunk/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+
+  # New Relic Agent - queries metrics
+  newrelic:
+    enabled: true
+    type: "newrelic"
+    description: "Retrieves New Relic metrics based on ticket context"
+    team: "operations"
+    knowledge_dir: "knowledge/newrelic"
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/newrelic/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+
+  # metrics removed in minimal repo
+
+  # Worker Agent - executes specific tasks and workflows
+  # worker removed in minimal repo
+
+  # Coordinator Agent - coordinates between multiple agents
+  # coordinator removed in minimal repo
+
+  # Supervisor Agent - orchestrates multi-agent workflows
+  supervisor:
+    enabled: true
+    model: "{CENTRAL_LLM_GATEWAY_URL}/v1/chat/completions"
+    type: "supervisor"
+    description: "Orchestrates multi-agent workflows"
+    team: "operations"
+
+    # Prompt configuration - Core to agent behavior
+    prompts:
+      system_prompt:
+        type: "file"
+        path: "prompts/supervisor/system_prompt.md"
+        variables:
+          ORG_NAME: "{ORG_NAME}"
+          ENVIRONMENT: "{ENVIRONMENT}"
+      
+      runtime_prompts:
+        task_coordination:
+          type: "file"
+          path: "prompts/supervisor/task_coordination.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+        
+        escalation:
+          type: "file"
+          path: "prompts/supervisor/escalation.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+        
+        conflict_resolution:
+          type: "file"
+          path: "prompts/supervisor/conflict_resolution.md"
+          variables:
+            ORG_NAME: "{ORG_NAME}"
+
+    # Resource ingestion configuration
+    resources:
+      knowledge_base:
+        - type: "file"
+          path: "resources/supervisor/agent_capabilities.yaml"
+          description: "Agent capabilities and specializations"
+        - type: "file"
+          path: "resources/supervisor/workflow_templates.yaml"
+          description: "Common workflow templates and patterns"
+        - type: "url"
+          url: "https://docs.{ORG_NAME}.com/agent-orchestration"
+          description: "Agent orchestration documentation"
+      
+      templates:
+        - type: "file"
+          path: "resources/supervisor/templates/task_breakdown.md"
+          description: "Task breakdown template"
+        - type: "file"
+          path: "resources/supervisor/templates/escalation_report.md"
+          description: "Escalation report template"
+
+    # MCP Server configuration
+    mcp_servers:
+      - team: "operations"
+        port: 8086
+        tools: ["task_coordination", "escalation", "conflict_resolution"]
+
+    tools:
+      - splunk_search
+      - zendesk_ticket_create
+      - newrelic_metrics
+      - vault_secret_read
+
+    confidence_threshold: 0.9
+    max_iterations: 10
+    timeout: 300
+
+# Global settings that apply across all agents
+
+  # runbook agent removed in minimal repo
+
+global_settings:
+  # Default model settings
+  default_temperature: 0.1
+  default_max_tokens: 2048
+
+  # Retry and timeout settings
+  default_retry_attempts: 3
+  default_retry_delay: 1.0
+  default_timeout: 120
+
+  # Rate limiting
+  max_requests_per_minute: 60
+  max_concurrent_requests: 10
+
+  # Security settings
+  enable_audit_logging: true
+  mask_sensitive_data: true
+
+  # Performance settings
+  enable_caching: true
+  cache_ttl: 300
+
+  # Development settings
+  enable_debug_mode: true
+  log_level: "INFO"

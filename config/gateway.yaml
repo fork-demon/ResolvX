@@ -1,0 +1,349 @@
+# Gateway Configuration for Golden Agent Framework
+# This file configures the integration with MCP and LLM gateways
+
+# MCP (Model Context Protocol) Gateway Configuration
+mcp_gateway:
+  # Primary gateway endpoint
+  url: "{CENTRAL_MCP_GATEWAY_URL}"
+
+  # Connection settings
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 1.0
+  retry_backoff_factor: 2.0
+
+  # Authentication
+  auth:
+    type: "bearer"  # Options: bearer, basic, api_key, none
+    token: null     # Set via environment variable: MCP_GATEWAY_TOKEN
+
+  # Fallback behavior when gateway is unavailable
+  fallback_mode: "local"  # Options: local, error, mock
+
+  # Health check settings
+  health_check:
+    enabled: true
+    interval: 60  # seconds
+    endpoint: "/health"
+    timeout: 10
+
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 120
+    burst_size: 20
+
+# LLM Gateway Configuration
+llm_gateway:
+  # Primary gateway endpoint
+  url: "{CENTRAL_LLM_GATEWAY_URL}"
+
+  # Default model settings
+  default_model: "gpt-4"
+  fallback_model: "gpt-3.5-turbo"
+
+  # Connection settings
+  timeout: 60
+  retry_attempts: 2
+  retry_delay: 2.0
+
+  # Authentication
+  auth:
+    type: "bearer"  # Options: bearer, basic, api_key
+    token: null     # Set via environment variable: LLM_GATEWAY_TOKEN
+
+  # Model routing and load balancing
+  models:
+    gpt-4:
+      endpoint: "/v1/chat/completions"
+      max_tokens: 4096
+      temperature: 0.1
+
+    gpt-3.5-turbo:
+      endpoint: "/v1/chat/completions"
+      max_tokens: 2048
+      temperature: 0.1
+
+    claude-3-sonnet:
+      endpoint: "/v1/anthropic/completions"
+      max_tokens: 4096
+      temperature: 0.1
+
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 60
+    tokens_per_minute: 100000
+
+# Tool Registry - Central configuration for all available tools
+tools:
+  # === MCP-based Tools (via central gateway) ===
+
+  # Splunk integration
+  splunk_search:
+    type: "mcp"
+    server: "splunk-mcp-server"
+    description: "Search Splunk logs and metrics"
+
+    config:
+      base_url: "https://splunk.{ORG_NAME}.com"
+      default_index: "main"
+      search_timeout: 30
+
+    capabilities:
+      - "search_logs"
+      - "get_metrics"
+      - "create_alerts"
+
+    rate_limit:
+      requests_per_minute: 30
+
+  # Zendesk integration
+  zendesk_ticket_create:
+    type: "mcp"
+    server: "zendesk-mcp-server"
+    description: "Create and manage Zendesk tickets"
+
+    config:
+      subdomain: "{ORG_NAME}"
+      default_priority: "normal"
+      default_type: "incident"
+
+    capabilities:
+      - "create_ticket"
+      - "update_ticket"
+      - "add_comment"
+      - "get_ticket"
+
+    rate_limit:
+      requests_per_minute: 60
+
+  # New Relic integration
+  newrelic_metrics:
+    type: "mcp"
+    server: "newrelic-mcp-server"
+    description: "Query New Relic metrics and alerts"
+
+    config:
+      account_id: null  # Set via environment
+      region: "US"
+      api_version: "v1"
+
+    capabilities:
+      - "query_nrql"
+      - "get_alerts"
+      - "get_dashboards"
+      - "get_entities"
+
+    rate_limit:
+      requests_per_minute: 100
+
+  # HashiCorp Vault integration
+  vault_secret_read:
+    type: "mcp"
+    server: "vault-mcp-server"
+    description: "Read secrets from HashiCorp Vault"
+
+    config:
+      address: "https://vault.{ORG_NAME}.com"
+      api_version: "v1"
+      mount_path: "secret"
+
+    capabilities:
+      - "read_secret"
+      - "list_secrets"
+
+    rate_limit:
+      requests_per_minute: 50
+
+    security:
+      audit_access: true
+      mask_responses: true
+
+  # === Local Custom Tools ===
+
+  # Custom metrics collection
+  custom_metrics:
+    type: "local"
+    module: "extensions.custom_tools.metrics"
+    description: "Custom metrics collection and analysis tool"
+
+    config:
+      collection_interval: 60
+      retention_days: 30
+      aggregation_functions: ["avg", "max", "min", "count"]
+
+    capabilities:
+      - "collect_metrics"
+      - "aggregate_data"
+      - "generate_reports"
+
+  # Database query tool
+  database_query:
+    type: "local"
+    module: "extensions.custom_tools.database"
+    description: "Execute safe database queries"
+
+    config:
+      connection_pool_size: 5
+      query_timeout: 30
+      allowed_operations: ["SELECT", "SHOW", "DESCRIBE"]
+
+    capabilities:
+      - "execute_query"
+      - "get_schema"
+      - "validate_query"
+
+    security:
+      sanitize_queries: true
+      audit_queries: true
+
+  # File system operations
+  filesystem_ops:
+    type: "local"
+    module: "extensions.custom_tools.filesystem"
+    description: "Safe file system operations"
+
+    config:
+      allowed_paths: ["/app/data", "/tmp"]
+      max_file_size: "10MB"
+      allowed_extensions: [".txt", ".json", ".yaml", ".log"]
+
+    capabilities:
+      - "read_file"
+      - "write_file"
+      - "list_directory"
+
+    security:
+      path_validation: true
+      size_limits: true
+
+# Service Discovery Configuration
+service_discovery:
+  enabled: true
+
+  # Auto-discovery of MCP servers
+  mcp_discovery:
+    enabled: true
+    discovery_endpoint: "{CENTRAL_MCP_GATEWAY_URL}/discovery"
+    refresh_interval: 300  # 5 minutes
+
+    # Health check discovered services
+    health_check:
+      enabled: true
+      interval: 120
+      timeout: 10
+
+  # Manual service registration
+  static_services:
+    - name: "splunk-mcp-server"
+      url: "mcp://splunk.{ORG_NAME}.com:8080"
+      health_endpoint: "/health"
+
+    - name: "zendesk-mcp-server"
+      url: "mcp://zendesk-gateway.{ORG_NAME}.com:8080"
+      health_endpoint: "/health"
+
+# Circuit Breaker Configuration
+circuit_breaker:
+  enabled: true
+
+  # Default settings for all tools
+  default_settings:
+    failure_threshold: 5      # Number of failures before opening circuit
+    success_threshold: 3      # Number of successes needed to close circuit
+    timeout: 60              # Circuit open timeout in seconds
+
+  # Tool-specific overrides
+  tool_settings:
+    vault_secret_read:
+      failure_threshold: 2    # More sensitive for security tools
+      timeout: 30
+
+    database_query:
+      failure_threshold: 3
+      timeout: 45
+
+# Monitoring and Observability
+monitoring:
+  # Gateway performance metrics
+  metrics:
+    enabled: true
+    export_interval: 60
+
+    collectors:
+      - "request_duration"
+      - "request_count"
+      - "error_rate"
+      - "circuit_breaker_state"
+
+  # Distributed tracing
+  tracing:
+    enabled: true
+    sampler_type: "probabilistic"
+    sampler_param: 0.1  # 10% sampling rate
+
+    headers:
+      trace_id: "X-Trace-ID"
+      span_id: "X-Span-ID"
+
+  # Health checks
+  health_checks:
+    enabled: true
+    endpoint: "/health"
+
+    checks:
+      - name: "mcp_gateway"
+        type: "http"
+        url: "{CENTRAL_MCP_GATEWAY_URL}/health"
+        interval: 30
+
+      - name: "llm_gateway"
+        type: "http"
+        url: "{CENTRAL_LLM_GATEWAY_URL}/health"
+        interval: 30
+
+# Security Configuration
+security:
+  # Request validation
+  request_validation:
+    enabled: true
+    max_request_size: "1MB"
+    allowed_content_types: ["application/json", "text/plain"]
+
+  # Response filtering
+  response_filtering:
+    enabled: true
+    filter_sensitive_data: true
+    redact_patterns:
+      - "password"
+      - "token"
+      - "secret"
+      - "key"
+
+  # Audit logging
+  audit:
+    enabled: true
+    log_requests: true
+    log_responses: false  # May contain sensitive data
+    retention_days: 90
+
+# Development and Testing
+development:
+  # Mock services for local development
+  mock_services:
+    enabled: true
+
+    mcp_gateway_mock:
+      port: 8001
+      responses_file: "tests/fixtures/mcp_responses.yaml"
+
+    llm_gateway_mock:
+      port: 8000
+      model: "mock-gpt-4"
+      response_delay: 0.5  # Simulate network latency
+
+  # Debug settings
+  debug:
+    log_level: "DEBUG"
+    log_requests: true
+    log_responses: true
+    detailed_errors: true

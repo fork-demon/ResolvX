@@ -1,0 +1,98 @@
+# Production Environment Configuration
+# This file should be customized for your production deployment
+
+# Organization settings
+org_name: "{ORG_NAME}"
+
+# Production gateway URLs
+central_llm_gateway_url: "https://llm-gateway.{ORG_NAME}.com"
+central_mcp_gateway_url: "https://mcp-gateway.{ORG_NAME}.com"
+
+# Production settings
+default_agent_version: "1.0.0"
+default_embedding_model: "text-embedding-ada-002"
+
+# Production confidence thresholds (more conservative)
+default_confidence_threshold_triage: 0.9
+default_confidence_threshold_metrics: 0.8
+default_confidence_threshold_poller: 0.95
+
+# Production environment settings
+debug: false
+environment: "production"
+
+# Production memory backend
+memory:
+  backend: "redis"
+  redis:
+    host: "redis.{ORG_NAME}.com"
+    port: 6379
+    db: 0
+    password: null  # Set via environment variable
+
+# Production observability
+observability:
+  backend: "langsmith"
+  langsmith:
+    api_url: "https://api.smith.langchain.com"
+    api_key: null  # Set via environment variable
+    project_name: "{ORG_NAME}-agents-prod"
+
+# Production RAG backend
+rag:
+  backend: "llamaindex"
+  llamaindex:
+    embedding_model: "text-embedding-ada-002"
+    chunk_size: 1024
+    chunk_overlap: 200
+    similarity_threshold: 0.8
+
+# Production gateway settings
+gateway:
+  mcp_gateway:
+    url: "https://mcp-gateway.{ORG_NAME}.com"
+    timeout: 30
+    retry_attempts: 3
+    fallback_mode: "error"
+
+  llm_gateway:
+    url: "https://llm-gateway.{ORG_NAME}.com"
+    default_model: "gpt-4"
+    timeout: 60
+
+# Production agent settings
+agents:
+  triage:
+    enabled: true
+    timeout: 120
+    confidence_threshold: 0.9
+
+  poller:
+    enabled: true
+    timeout: 60
+    custom_settings:
+      schedule: "*/5 * * * *"  # Every 5 minutes
+
+  metrics:
+    enabled: true
+    timeout: 180
+    confidence_threshold: 0.8
+
+  supervisor:
+    enabled: true
+    timeout: 300
+    confidence_threshold: 0.95
+
+# Production global settings
+global_settings:
+  default_temperature: 0.05  # More conservative for production
+  default_max_tokens: 2048
+  default_retry_attempts: 3
+  default_timeout: 120
+  max_requests_per_minute: 100
+  max_concurrent_requests: 20
+  enable_audit_logging: true
+  mask_sensitive_data: true
+  enable_caching: true
+  cache_ttl: 600  # 10 minutes
+  log_level: "INFO"

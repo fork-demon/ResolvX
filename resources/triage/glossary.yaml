@@ -1,0 +1,35 @@
+# Business Domain Glossary (minimal)
+
+entities:
+  GTIN:
+    name: "Global Trade Item Number"
+    description: "International identifier for trade items; often 12-14 digits."
+    patterns:
+      - "\b\d{12,14}\b"
+    examples: ["05000123456789"]
+    synonyms: ["barcode", "ean", "upc"]
+    type: "product_id"
+
+  TPNB:
+    name: "Tesco Product Number - Base"
+    description: "Internal product identifier (numeric)."
+    patterns:
+      - "\b\d{6,10}\b"
+    examples: ["1234567"]
+    synonyms: ["product id", "sku"]
+    type: "product_id"
+
+  LocationCluster:
+    name: "Location Cluster"
+    description: "Group of stores/locations treated as a unit for operations."
+    patterns: []
+    examples: ["cluster-uk-north", "region-london"]
+    synonyms: ["region", "area", "store cluster"]
+    type: "location_group"
+
+extraction_hints:
+  - "Prefer explicit labels near numbers (e.g., 'GTIN: 0500…')."
+  - "Disambiguate numeric identifiers by expected length and context words."
+  - "Treat 'store'+'region' terms as location concepts."
+
+
