@@ -44,11 +44,15 @@ async def main():
     await tool_registry.initialize()
     print(f"  ✓ Tool Registry: {len(tool_registry.list_tools())} tools")
     
-    # Memory backend
+    # Memory backend (use FAISS from config for better duplicate detection)
     memory_factory = MemoryFactory()
-    memory = memory_factory.create_memory("mock", {})
+    memory_backend = config.memory.backend
+    memory_config = getattr(config.memory, memory_backend, {})
+    if hasattr(memory_config, 'dict'):
+        memory_config = memory_config.dict()
+    memory = memory_factory.create_memory(memory_backend, memory_config)
     await memory.initialize()
-    print(f"  ✓ Memory Backend: mock")
+    print(f"  ✓ Memory Backend: {memory_backend}")
     
     # Initialize agents
     print("\n🤖 Initializing agents...")

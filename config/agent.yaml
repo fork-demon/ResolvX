@@ -7,30 +7,16 @@ version: "0.1.0"
 environment: "local"
 debug: true
 
-# Memory configuration - pluggable backend system
+# Memory configuration - FAISS vector memory backend
 memory:
-  backend: "faiss"  # Options: faiss, redis, pinecone, mock
+  backend: "faiss"
 
   faiss:
     index_path: "./data/faiss_index"
     embedding_model: "{DEFAULT_EMBEDDING_MODEL}"
-    dimension: 1536
-    index_type: "IndexFlatL2"
-
-  redis:
-    host: "localhost"
-    port: 6379
-    db: 0
-    password: null
-
-  pinecone:
-    api_key: null  # Set via environment variable
-    environment: "us-west1-gcp"
-    index_name: "golden-agents"
-
-  mock:
-    persist: false
-    initial_data: []
+    dimension: null  # Auto-detect from embeddings (384 for all-MiniLM-L6-v2, 1536 for OpenAI)
+    index_type: "IndexFlatIP"  # Inner Product = Cosine Similarity for normalized embeddings
+    metric: "IP"
 
 # Observability configuration - pluggable monitoring system
 observability:
@@ -291,7 +277,8 @@ agents:
     # Behavior
     namespace_prefix: "tickets"
     search_limit: 10
-    search_threshold: 0.7
+    search_threshold: 0.9  # 90% similarity for duplicate detection
+    duplicate_threshold: 0.95  # 95% similarity for exact duplicates
     forward_mode: "return"  # or "invoke"
     embedding_model: "all-MiniLM-L6-v2"  # optional; falls back to text similarity if unavailable
 

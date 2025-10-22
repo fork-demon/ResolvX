@@ -81,16 +81,23 @@ class MemoryAgent(BaseAgent):
             
             result = await self.graph.ainvoke(state.dict())
             
+            # Extract action from result (it's in state.result)
+            result_data = result.get("result", {})
+            related_tickets = result.get("related_tickets", [])
+            action = result_data.get("action", "unknown")
+            
             # Set output data
             output_data = {
-                "related_count": len(result.get("related_tickets", [])),
-                "action": result.get("action", "unknown"),
-                "related_tickets": result.get("related_tickets", []),
+                "related_count": len(related_tickets),
+                "action": action,
+                "related_tickets": related_tickets,
+                "decision": result_data.get("decision", {}),
                 "success": result.get("success", True),
                 "ticket_id": state.input_data.get("ticket", {}).get("id", "unknown")
             }
             span.set_output(output_data)
-            span.set_attribute("related_count", len(result.get("related_tickets", [])))
+            span.set_attribute("related_count", len(related_tickets))
+            span.set_attribute("action", action)
             
             return result
 
@@ -166,12 +173,12 @@ class MemoryAgent(BaseAgent):
 
             state.related_tickets = related
             self._search_cache[key] = related
-            return state.dict()
+            return state
 
         except Exception as e:
             self.logger.error(f"Related search failed: {e}")
             state.related_tickets = []
-            return state.dict()
+            return state
 
     async def _forward_or_store(self, state: MemoryAgentState) -> Dict[str, Any]:
         try:
@@ -211,7 +218,7 @@ class MemoryAgent(BaseAgent):
                     "timestamp": datetime.datetime.now().isoformat(),
                 }
                 state.result = payload
-                return payload
+                return state
 
             # No related: store current ticket
             if self.memory and (ticket.get("subject") or ticket.get("description")):
@@ -238,6 +245,10 @@ class MemoryAgent(BaseAgent):
                     source_id=str(ticket.get("id")),
                     importance_score=0.6,
                 )
+                
+                # Clear cache after storing new ticket (so future searches find it)
+                self._search_cache.clear()
+                self.logger.debug("Cleared search cache after storing new ticket")
 
             payload = {
                 "success": True,
@@ -248,10 +259,11 @@ class MemoryAgent(BaseAgent):
                 "timestamp": datetime.datetime.now().isoformat(),
             }
             state.result = payload
-            return payload
+            return state
 
         except Exception as e:
             self.logger.error(f"Forward-or-store failed: {e}")
-            return {"success": False, "error": str(e)}
+            state.result = {"success": False, "error": str(e)}
+            return state
 
 
