@@ -115,13 +115,11 @@ def _configure_langfuse_metrics(langfuse_config: Dict[str, Any]) -> None:
 
 def _initialize_default_metrics() -> None:
     """Initialize default framework metrics."""
-    global (
-        _agent_execution_counter, _agent_execution_duration,
-        _tool_execution_counter, _tool_execution_duration,
-        _workflow_execution_counter, _workflow_execution_duration,
-        _memory_operations_counter, _gateway_requests_counter,
-        _gateway_request_duration, _active_agents_gauge, _framework_info
-    )
+    global _agent_execution_counter, _agent_execution_duration
+    global _tool_execution_counter, _tool_execution_duration
+    global _workflow_execution_counter, _workflow_execution_duration
+    global _memory_operations_counter, _gateway_requests_counter
+    global _gateway_request_duration, _active_agents_gauge, _framework_info
 
     # Agent metrics
     _agent_execution_counter = Counter(

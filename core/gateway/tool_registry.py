@@ -88,7 +88,7 @@ class ToolRegistry:
     discovery, validation, and execution capabilities.
     """
 
-    def __init__(self, config: Optional[Config] = None, mcp_client: Optional[MCPClient] = None):
+    def __init__(self, config: Optional[Any] = None, mcp_client: Optional[MCPClient] = None):
         """
         Initialize tool registry.
 
@@ -209,6 +209,10 @@ class ToolRegistry:
         except Exception as e:
             self.logger.error(f"Tool execution failed for {tool_name}: {e}")
             raise ToolError(f"Tool {tool_name} execution failed: {e}") from e
+
+    # Backward compatibility alias
+    async def call_tool(self, tool_name: str, parameters: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+        return await self.execute_tool(tool_name, parameters, **kwargs)
 
     async def _execute_local_tool(
         self, tool_name: str, parameters: Dict[str, Any]
@@ -333,10 +337,18 @@ class ToolRegistry:
 
     async def _load_local_tools(self) -> None:
         """Load local tools from configuration."""
-        if not self.config or not self.config.gateway.tools:
+        tools_cfg: Optional[Dict[str, Any]] = None
+        if not self.config:
+            return
+        # Support both full Config (with .gateway.tools) and GatewayConfig (with .tools)
+        if hasattr(self.config, 'tools') and isinstance(self.config.tools, dict):
+            tools_cfg = self.config.tools
+        elif hasattr(self.config, 'gateway') and getattr(self.config.gateway, 'tools', None):
+            tools_cfg = self.config.gateway.tools
+        else:
             return
 
-        for tool_name, tool_config in self.config.gateway.tools.items():
+        for tool_name, tool_config in tools_cfg.items():
             if tool_config.get("type") == "local":
                 try:
                     await self._load_local_tool(tool_name, tool_config)

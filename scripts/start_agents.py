@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from core.config import Config
+from core.config import Config, load_config
 from core.observability.factory import configure_observability
 from core.graph.executor import GraphExecutor
 from core.memory.factory import MemoryFactory
@@ -42,21 +42,28 @@ class AgentManager:
         
         # Initialize core components
         self.memory_factory = MemoryFactory()
-        self.tool_registry = ToolRegistry(config.gateway)
+        # Tool registry is initialized in start_agents to allow per-agent overrides
+        self.tool_registry = None
         self.llm_client = LLMGatewayClient(config.gateway)
         self.prompt_manager = PromptManager()
         
-        # Initialize graph executor
-        self.graph_executor = GraphExecutor(
-            memory_factory=self.memory_factory,
-            tool_registry=self.tool_registry,
-            llm_client=self.llm_client,
-            prompt_manager=self.prompt_manager,
-        )
+        # Initialize graph executor (no-arg constructor)
+        self.graph_executor = GraphExecutor()
 
     async def start_agents(self):
         """Start all configured agents."""
         self.logger.info("Starting Golden Agent Framework...")
+
+        # Initialize default MCP-backed ToolRegistry (central gateway)
+        try:
+            from core.gateway.mcp_client import MCPClient
+            default_mcp_client = MCPClient(self.config)
+            await default_mcp_client.initialize()
+            self.tool_registry = ToolRegistry(self.config.gateway, mcp_client=default_mcp_client)
+            await self.tool_registry.initialize()
+        except Exception as e:
+            self.logger.warning(f"ToolRegistry initialization failed or MCP unavailable: {e}")
+            self.tool_registry = ToolRegistry(self.config.gateway)
         
         # Load agent configurations
         for agent_name, agent_config in self.config.agents.items():
@@ -87,6 +94,7 @@ class AgentManager:
         # For poller, support scheduled run or continuous polling
         if agent_name == "poller" and agent_config.enabled:
             from agents.poller.agent import ZendeskPollerAgent
+            tool_registry = await self._get_tool_registry_for_agent(agent_config)
             # Build minimal config dict for agent
             poller_cfg: Dict[str, Any] = {
                 "team": agent_config.team,
@@ -96,13 +104,19 @@ class AgentManager:
                 "auto_assign_enabled": getattr(agent_config, "auto_assign_enabled", False),
                 "zendesk": getattr(agent_config, "zendesk", {}),
             }
-            agent = ZendeskPollerAgent(poller_cfg, tool_registry=self.tool_registry, memory=None, rag=None)
+            agent = ZendeskPollerAgent(poller_cfg, tool_registry=tool_registry, memory=None, rag=None)
 
             # Check for schedule (cron string). If present, run on schedule; else start continuous polling.
             schedule: Optional[str] = getattr(agent_config, "schedule", None)
             if schedule:
                 self.logger.info(f"Scheduling poller with cron: {schedule}")
                 await self._schedule_poller(agent, schedule)
+                # Trigger an immediate single run at startup
+                try:
+                    self.logger.info("Triggering initial poller run_once at startup")
+                    await agent.run_once()
+                except Exception as e:
+                    self.logger.warning(f"Initial poller run_once failed: {e}")
             else:
                 self.logger.info("Starting poller in continuous mode")
                 await agent.start_polling()
@@ -136,9 +150,13 @@ class AgentManager:
             return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
 
         # Default: log and return mock instance
-        self.logger.info(f"Creating {agent_name} agent with type: {agent_config.type}")
-        self.logger.info(f"Team: {agent_config.team}")
-        self.logger.info(f"Prompts: {len(agent_config.prompts.runtime_prompts) if hasattr(agent_config, 'prompts') else 0}")
+        self.logger.info(f"Creating {agent_name} agent with type: {getattr(agent_config, 'type', 'unknown')}")
+        self.logger.info(f"Team: {getattr(agent_config, 'team', 'unknown')}")
+        try:
+            rp = (agent_config.prompts or {}).get('runtime_prompts', {}) if hasattr(agent_config, 'prompts') else {}
+            self.logger.info(f"Prompts: {len(rp)}")
+        except Exception:
+            self.logger.info("Prompts: 0")
 
         return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
 
@@ -190,6 +208,25 @@ class AgentManager:
                     await asyncio.sleep(interval_seconds)
             asyncio.create_task(loop())
 
+    async def _get_tool_registry_for_agent(self, agent_config: Any) -> ToolRegistry:
+        """Return a ToolRegistry, honoring per-agent MCP gateway override if present."""
+        try:
+            agent_mcp = getattr(agent_config, "mcp_gateway", None)
+            if agent_mcp and isinstance(agent_mcp, dict) and agent_mcp.get("url"):
+                from core.gateway.mcp_client import MCPClient
+                mcp_client = MCPClient(self.config)
+                # Override gateway URL for this agent
+                mcp_client.gateway_url = agent_mcp.get("url")
+                await mcp_client.initialize()
+                tr = ToolRegistry(self.config.gateway, mcp_client=mcp_client)
+                await tr.initialize()
+                return tr
+        except Exception as e:
+            self.logger.warning(f"Per-agent MCP override failed; falling back to default registry: {e}")
+
+        # Fallback to default registry
+        return self.tool_registry
+
     async def stop_agents(self):
         """Stop all agents."""
         self.logger.info("Stopping all agents...")
@@ -223,7 +260,7 @@ async def main():
     
     # Load configuration
     try:
-        config = Config.load()
+        config = load_config()
         print("Configuration loaded successfully")
     except Exception as e:
         print(f"Failed to load configuration: {e}")
@@ -241,14 +278,26 @@ async def main():
     
     # Start agents
     await agent_manager.start_agents()
-    
+
+    # Short verification window before exit (unless running as a service)
+    verify_seconds = int(os.getenv("START_AGENTS_VERIFY_SECONDS", "5"))
+    if verify_seconds > 0:
+        try:
+            await asyncio.sleep(verify_seconds)
+        except Exception:
+            pass
+
     # Print status
     status = agent_manager.get_agent_status()
     print(f"\nAgent Status:")
     print(f"  Total agents: {status['total_agents']}")
     print(f"  Running agents: {status['running_agents']}")
     print(f"  Agents: {list(status['agents'].keys())}")
-    
+
+    # Exit early after verification window if requested
+    if verify_seconds > 0 and os.getenv("START_AGENTS_EXIT_AFTER_VERIFY", "1") == "1":
+        return
+
     # Handle shutdown gracefully
     def signal_handler(signum, frame):
         print("\nShutting down agents...")

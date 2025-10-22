@@ -34,22 +34,22 @@ memory:
 
 # Observability configuration - pluggable monitoring system
 observability:
-  backend: "langsmith"  # Options: langsmith, langfuse, console
+  backend: "langfuse"  # Options: langsmith, langfuse, console
 
   langsmith:
     api_url: "https://api.smith.langchain.com"
     api_key: "{LANGSMITH_API_KEY}"
     project_name: "{ORG_NAME}-agents"
     environment: "{ENVIRONMENT}"
-    enabled: true
+    enabled: false
 
   langfuse:
     public_key: "{LANGFUSE_PUBLIC_KEY}"
     secret_key: "{LANGFUSE_SECRET_KEY}"
-    host: "https://cloud.langfuse.com"
+    host: "{LANGFUSE_HOST}"
     project_name: "{ORG_NAME}-agents"
     environment: "{ENVIRONMENT}"
-    enabled: false
+    enabled: true
 
   console:
     level: "INFO"
@@ -79,7 +79,7 @@ gateway:
   # LLM Gateway
   llm_gateway:
     url: "{CENTRAL_LLM_GATEWAY_URL}"
-    default_model: "gpt-4"
+    default_model: "llama3.2"
     timeout: 60
     retry_attempts: 2
 
@@ -106,30 +106,29 @@ gateway:
       server: "vault-mcp-server"
       description: "Read secrets from HashiCorp Vault"
 
-    # Local custom tools
+    # Custom tools (mapped via MCP mock gateway for demo parity)
     product_lookup:
-      type: "local"
-      module: "core.tools.team_tools:product_lookup"
+      type: "mcp"
+      server: "mock-mcp-gateway"
       description: "Lookup product by GTIN/TPNB"
 
     location_lookup:
-      type: "local"
-      module: "core.tools.team_tools:location_lookup"
+      type: "mcp"
+      server: "mock-mcp-gateway"
       description: "Resolve location cluster to stores"
 
-    # Optional local mocks for dev
-    splunk_search_mock:
-      type: "local"
-      module: "core.mocks.tools:splunk_search_mock"
-      description: "Mock Splunk search"
-    newrelic_metrics_mock:
-      type: "local"
-      module: "core.mocks.tools:newrelic_metrics_mock"
-      description: "Mock New Relic metrics"
-    zendesk_poll_queue_mock:
-      type: "local"
-      module: "core.mocks.tools:zendesk_poll_queue_mock"
-      description: "Mock Zendesk queue polling"
+    # Price API tools via MCP (mock gateway in local compose)
+    # Price API tools via centralized MCP (mock gateway in local compose)
+    price_minimum_calculate: { type: "mcp", server: "mock-mcp-gateway", description: "Calculate minimum price for GTIN across clusters" }
+    price_minimum_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get minimum price for GTIN and cluster" }
+    basket_segment_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get basket segment for TPNB, cluster, subclass" }
+    competitor_prices_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get competitor prices for TPNB across clusters" }
+    competitor_promotional_prices_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get competitor promo prices for TPNBs across clusters" }
+    promo_effectiveness_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get promotion effectiveness for TPNBs across clusters" }
+    policies_view: { type: "mcp", server: "mock-mcp-gateway", description: "View pricing policies for clusters and classifications" }
+    base_prices_get: { type: "mcp", server: "mock-mcp-gateway", description: "Get base price for TPNB at cluster and effective date" }
+
+    # Optional local mocks removed; using MCP mock gateway uniformly
 
 # Agent configurations - each agent has its own settings
 agents:
@@ -179,18 +178,24 @@ agents:
           path: "resources/triage/glossary.yaml"
           description: "Business domain glossary for entity extraction and disambiguation"
 
-    # MCP Server configuration
-    mcp_servers:
-      - team: "operations"
-        port: 8086
-        tools: ["incident_analysis", "routing_decision", "escalation_check"]
+    # Optional per-agent MCP override (e.g., internal team MCP server)
+    # mcp_gateway:
+    #   url: "http://localhost:9091"
 
     tools:
       - splunk_search
       - zendesk_ticket_create
       - newrelic_metrics
+      - product_lookup
+      - location_lookup
+      - price_minimum_get
+      - base_prices_get
+      - basket_segment_get
+      - competitor_prices_get
+      - competitor_promotional_prices_get
+      - promo_effectiveness_get
 
-    confidence_threshold: {DEFAULT_CONFIDENCE_THRESHOLDS.triage}
+    confidence_threshold: 0.8
     max_iterations: 5
     timeout: 120
 
@@ -260,24 +265,20 @@ agents:
 
     # No resources for minimal poller
 
-    # MCP Server configuration
-    mcp_servers:
-      - team: "operations"
-        port: 8088
-        tools: ["poll_queue", "get_ticket_details", "update_ticket_status", "assign_ticket", "get_queue_stats"]
+    # Optional per-agent MCP override
+    # mcp_gateway:
+    #   url: "http://localhost:9092"
 
     tools:
-      - splunk_search
-      - newrelic_metrics
-      - custom_metrics
+      - poll_queue
+      - get_queue_stats
 
-    confidence_threshold: {DEFAULT_CONFIDENCE_THRESHOLDS.poller}
+    confidence_threshold: 0.9
     max_iterations: 3
     timeout: 60
 
     # Poller-specific settings
-    custom_settings:
-      # Reserved for future HTTP targets if needed
+    custom_settings: {}
 
   # Metrics Agent - collects and analyzes performance metrics
   # Memory Agent - historical ticket lookup and insertion
@@ -397,11 +398,9 @@ agents:
           path: "resources/supervisor/templates/escalation_report.md"
           description: "Escalation report template"
 
-    # MCP Server configuration
-    mcp_servers:
-      - team: "operations"
-        port: 8086
-        tools: ["task_coordination", "escalation", "conflict_resolution"]
+    # Optional per-agent MCP override
+    # mcp_gateway:
+    #   url: "http://localhost:9093"
 
     tools:
       - splunk_search

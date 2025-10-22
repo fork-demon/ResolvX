@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Dict, List, Optional
 
-from langgraph import StateGraph, END
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from core.graph.base import BaseAgent
@@ -31,7 +31,7 @@ class MemoryAgentState(AgentState):
     result: Dict[str, Any] = Field(default_factory=dict, description="Final result")
 
 
-class MemoryAgent(BaseAgent[MemoryAgentState]):
+class MemoryAgent(BaseAgent):
     """
     Memory Agent that performs historical lookup and conditional insertion.
     """

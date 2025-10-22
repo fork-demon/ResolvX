@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
-from langgraph.graph.graph import CompiledGraph
+from typing import Any
 from langgraph.checkpoint.base import Checkpoint
 
 from core.config import Config
@@ -47,7 +47,7 @@ class GraphExecutor:
 
     async def execute(
         self,
-        graph: CompiledGraph,
+        graph: Any,
         input_data: Union[Dict[str, Any], AgentState, WorkflowState],
         config: Optional[Dict[str, Any]] = None,
         execution_id: Optional[str] = None,
@@ -94,7 +94,7 @@ class GraphExecutor:
 
     async def stream(
         self,
-        graph: CompiledGraph,
+        graph: Any,
         input_data: Union[Dict[str, Any], AgentState, WorkflowState],
         config: Optional[Dict[str, Any]] = None,
         execution_id: Optional[str] = None,
@@ -142,7 +142,7 @@ class GraphExecutor:
 
     async def execute_with_approval(
         self,
-        graph: CompiledGraph,
+        graph: Any,
         input_data: Union[Dict[str, Any], AgentState, WorkflowState],
         approval_callback: callable,
         config: Optional[Dict[str, Any]] = None,

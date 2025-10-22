@@ -45,6 +45,13 @@ class LangFuseSpan(BaseModel):
     attributes: Dict[str, Any] = Field(default_factory=dict)
     events: List[Dict[str, Any]] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    input: Optional[Any] = None
+    output: Optional[Any] = None
+    langfuse_span: Optional[Any] = Field(default=None, exclude=True)  # Reference to actual Langfuse span
+    
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
 
 
 class LangFuseTracer:
@@ -87,8 +94,8 @@ class LangFuseTracer:
                 host=self.config.host,
             )
             
-            # Start batch processing task
-            self._batch_task = asyncio.create_task(self._batch_processor())
+            # Don't start batch processing task here - it will be started when first span is created
+            self._batch_task = None
             
             self.logger.info("LangFuse tracer initialized successfully")
             
@@ -121,6 +128,14 @@ class LangFuseTracer:
         if not self.config.enabled:
             return str(uuid4())
         
+        # Start batch processor if not already started
+        if self._batch_task is None:
+            try:
+                self._batch_task = asyncio.create_task(self._batch_processor())
+                self.logger.debug("Started LangFuse batch processor")
+            except Exception as e:
+                self.logger.warning(f"Failed to start batch processor: {e}")
+        
         span = LangFuseSpan(
             name=name,
             parent_span_id=parent_span_id,
@@ -130,6 +145,24 @@ class LangFuseTracer:
         
         self._spans[span.span_id] = span
         
+        # Create actual Langfuse span if client is available
+        if self._client:
+            try:
+                # Prepare metadata from tags and attributes
+                metadata = {**span.tags, **span.attributes}
+                
+                # Start Langfuse span
+                langfuse_span = self._client.start_span(
+                    name=name,
+                    metadata=metadata
+                )
+                
+                # Store the Langfuse span reference
+                span.langfuse_span = langfuse_span
+                
+            except Exception as e:
+                self.logger.error(f"Failed to start Langfuse span: {e}")
+        
         self.logger.debug(f"Started span: {name} ({span.span_id})")
         return span.span_id
 
@@ -138,6 +171,7 @@ class LangFuseTracer:
         span_id: str,
         status: str = "completed",
         attributes: Optional[Dict[str, Any]] = None,
+        output: Optional[Any] = None,
     ):
         """
         End a span.
@@ -146,6 +180,7 @@ class LangFuseTracer:
             span_id: Span ID
             status: Span status
             attributes: Additional attributes
+            output: Span output data
         """
         if not self.config.enabled or span_id not in self._spans:
             return
@@ -157,6 +192,22 @@ class LangFuseTracer:
         
         if attributes:
             span.attributes.update(attributes)
+        
+        if output is not None:
+            span.output = output
+        
+        # End the Langfuse span if it exists
+        if hasattr(span, 'langfuse_span') and span.langfuse_span:
+            try:
+                # Update the Langfuse span with final data
+                span.langfuse_span.update(
+                    output=output,
+                    metadata={**span.tags, **span.attributes},
+                    status_message=status
+                )
+                # The span will be automatically ended when it goes out of scope
+            except Exception as e:
+                self.logger.error(f"Failed to update Langfuse span: {e}")
         
         # Queue for batch processing
         await self._queue_span(span)
@@ -474,40 +525,28 @@ class LangFuseTracer:
             return
         
         try:
-            # Convert spans to LangFuse format
-            langfuse_spans = []
-            for span_data in self._batch_queue:
-                langfuse_span = {
-                    "id": span_data["span_id"],
-                    "trace_id": span_data["trace_id"],
-                    "parent_id": span_data["parent_span_id"],
-                    "name": span_data["name"],
-                    "start_time": span_data["start_time"],
-                    "end_time": span_data["end_time"],
-                    "duration_ms": span_data["duration_ms"],
-                    "status": span_data["status"],
-                    "tags": span_data["tags"],
-                    "attributes": span_data["attributes"],
-                    "events": span_data["events"],
-                    "metadata": span_data["metadata"],
-                }
-                langfuse_spans.append(langfuse_span)
+            span_count = len(self._batch_queue)
             
-            # Send to LangFuse
-            if self._client:
-                await self._client.create_spans(
-                    project_name=self.config.project_name,
-                    spans=langfuse_spans,
-                )
-            
-            # Clear queue
+            # Clear queue (spans are already sent via the context manager in start_span/end_span)
             self._batch_queue.clear()
             
-            self.logger.debug(f"Flushed {len(langfuse_spans)} spans to LangFuse")
+            # Flush the Langfuse client to ensure data is sent to the server
+            if self._client:
+                self._client.flush()
+            
+            self.logger.debug(f"Flushed {span_count} spans to LangFuse")
             
         except Exception as e:
             self.logger.error(f"Failed to flush spans to LangFuse: {e}")
 
+    async def flush(self):
+        """Manually flush queued spans to LangFuse."""
+        await self._flush_batch()
+        # Also flush the Langfuse client to ensure data is sent to the server
+        if self._client:
+            self._client.flush()
+        self.logger.debug("Manually flushed spans to LangFuse")
+    
     async def close(self):
         """Close the tracer and flush remaining spans."""
         if self._batch_task:

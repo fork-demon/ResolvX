@@ -1,0 +1,17 @@
+services:
+  price-api-mock:
+    build: ./mock_services/price_api
+    ports:
+      - "8090:8080"
+  mock-mcp-gateway:
+    build: ./mock_services/mcp_gateway
+    ports:
+      - "8081:8081"
+    environment:
+      - PRICE_API_BASE_URL=http://price-api-mock:8080
+      - MOCK_TICKETS_DIR=/data/mock_tickets
+    depends_on:
+      - price-api-mock
+    volumes:
+      - ./data/mock_tickets:/data/mock_tickets:ro
+

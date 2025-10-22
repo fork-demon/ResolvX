@@ -8,7 +8,7 @@ agent context, conversation history, and knowledge base information.
 from core.memory.base import BaseMemory, MemoryEntry
 from core.memory.faiss_memory import FAISSMemory
 from core.memory.redis_memory import RedisMemory
-from core.memory.pinecone_memory import PineconeMemory
+# Optional: Pinecone memory is not required for local demo; import lazily in factory
 from core.memory.mock_memory import MockMemory
 from core.memory.factory import MemoryFactory, create_memory
 

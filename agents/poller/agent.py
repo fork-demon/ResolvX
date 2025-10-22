@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, TypedDict
 
-from langgraph import StateGraph, END
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from core.config import AgentConfig
@@ -20,7 +20,8 @@ from core.graph.state import AgentState
 from core.memory.base import BaseMemory
 from core.observability import get_logger, get_tracer, get_metrics_client
 from core.gateway.tool_registry import ToolRegistry
-from extensions.rag_backends.base import BaseRAG
+# Optional RAG base; keep typing loose to avoid hard import
+from typing import Any as BaseRAG
 from extensions.mcp_servers.zendesk_tools import ZendeskConfig, ZendeskMCPServer
 
 
@@ -58,7 +59,7 @@ class ZendeskPollResult(BaseModel):
     ticket_count: int = Field(description="Number of tickets found")
     tickets: List[Dict[str, Any]] = Field(description="List of tickets")
     processing_time: float = Field(description="Processing time in seconds")
-    error: Optional[str] = Field(description="Error message if failed")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
     new_tickets: int = Field(description="Number of new tickets")
     updated_tickets: int = Field(description="Number of updated tickets")
 
@@ -130,7 +131,7 @@ class ZendeskPollerAgent(BaseAgent):
         self.zendesk_configs: Dict[str, ZendeskQueueConfig] = {}
         self.zendesk_mcp_server = None
         self.poll_tasks: Dict[str, asyncio.Task] = {}
-        
+
         # Polling configuration
         self.max_concurrent_polls = config.get("max_concurrent_polls", 5)
         self.default_poll_interval = config.get("default_poll_interval", 30)
@@ -282,9 +283,16 @@ class ZendeskPollerAgent(BaseAgent):
                             "limit": config.max_tickets_per_poll
                         }
                     )
-                    
-                    if poll_result.get("success"):
-                        tickets = poll_result.get("tickets", [])
+                    # Normalize nested tool result shapes: {result: {...}} or {result: {result: {...}}}
+                    inner = poll_result
+                    if isinstance(inner, dict) and "result" in inner and isinstance(inner["result"], dict):
+                        # unwrap once
+                        inner = inner["result"]
+                        if "result" in inner and isinstance(inner["result"], dict):
+                            inner = inner["result"]
+
+                    if isinstance(inner, dict) and inner.get("success") is True:
+                        tickets = inner.get("tickets", [])
                         all_tickets.extend(tickets)
                         
                         # Create poll result
@@ -322,7 +330,7 @@ class ZendeskPollerAgent(BaseAgent):
         """Forward polled tickets to the triage agent (no decision-making here)."""
         try:
             payload = {
-                "source_agent": self.agent_id,
+                "source_agent": self.name,
                 "team": self.team_name,
                 "queues": list(state.queues_to_poll),
                 "tickets": state.tickets,
@@ -662,7 +670,7 @@ class ZendeskPollerAgent(BaseAgent):
                     self.poll_tasks[queue_name] = task
             
             self.logger.info(f"Started polling for {len(self.poll_tasks)} queues")
-            
+
         except Exception as e:
             self.logger.error(f"Failed to start polling: {e}")
             raise AgentError(f"Failed to start polling: {e}")
@@ -682,7 +690,7 @@ class ZendeskPollerAgent(BaseAgent):
             
             self.poll_tasks.clear()
             self.logger.info("Stopped all polling tasks")
-            
+
         except Exception as e:
             self.logger.error(f"Failed to stop polling: {e}")
 
@@ -727,7 +735,7 @@ class ZendeskPollerAgent(BaseAgent):
                 return stats_result
             else:
                 return {"success": False, "error": "Tool registry not available"}
-                
+
         except Exception as e:
             self.logger.error(f"Error getting queue stats: {e}")
             return {"success": False, "error": str(e)}
@@ -735,6 +743,8 @@ class ZendeskPollerAgent(BaseAgent):
     async def run_once(self) -> Dict[str, Any]:
         """Run a single end-to-end polling cycle across all configured queues."""
         state = ZendeskPollerState(
+            agent_name="poller",
+            agent_type=self.__class__.__name__,
             input_data={"team": self.team_name},
             queue_configs=list(self.zendesk_configs.values()),
             last_poll_times={},

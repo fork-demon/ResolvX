@@ -24,6 +24,7 @@ from core.observability.logger import get_logger
 _tracer_configured = False
 _tracer_provider: Optional[TracerProvider] = None
 _current_config: Optional[Dict[str, Any]] = None
+_langfuse_tracer: Optional[Any] = None
 
 
 def configure_tracing(config: Optional[Config] = None) -> None:
@@ -74,9 +75,10 @@ def configure_tracing(config: Optional[Config] = None) -> None:
     # Set as global tracer provider
     trace.set_tracer_provider(_tracer_provider)
 
-    # Instrument HTTP libraries
-    RequestsInstrumentor().instrument()
-    HTTPXClientInstrumentor().instrument()
+    # Only instrument HTTP libraries if not using Langfuse
+    if backend != "langfuse":
+        RequestsInstrumentor().instrument()
+        HTTPXClientInstrumentor().instrument()
 
     _tracer_configured = True
     _current_config = observability_config
@@ -105,9 +107,26 @@ def _configure_langsmith_tracing(langsmith_config: Dict[str, Any]) -> None:
 
 def _configure_langfuse_tracing(langfuse_config: Dict[str, Any]) -> None:
     """Configure Langfuse-based tracing."""
-    # For now, fall back to console tracing
-    # Langfuse integration would be implemented here
-    _configure_console_tracing({"enabled": True})
+    from core.observability.langfuse_tracer import LangFuseTracer, LangFuseConfig
+    
+    # Create Langfuse config
+    langfuse_cfg = LangFuseConfig(
+        public_key=langfuse_config.get('public_key'),
+        secret_key=langfuse_config.get('secret_key'),
+        host=langfuse_config.get('host'),
+        project_name=langfuse_config.get('project_name'),
+        environment=langfuse_config.get('environment'),
+        enabled=langfuse_config.get('enabled', True)
+    )
+    
+    # Create Langfuse tracer
+    global _langfuse_tracer
+    _langfuse_tracer = LangFuseTracer(langfuse_cfg)
+    
+    # Set up a console exporter as fallback
+    console_exporter = ConsoleSpanExporter()
+    span_processor = BatchSpanProcessor(console_exporter)
+    _tracer_provider.add_span_processor(span_processor)
 
 
 def get_tracer(name: str) -> trace.Tracer:
@@ -124,7 +143,182 @@ def get_tracer(name: str) -> trace.Tracer:
     if not _tracer_configured:
         configure_tracing()
 
+    # If Langfuse tracer is configured, return a wrapper that uses it
+    if _langfuse_tracer and _current_config and _current_config.get("backend") == "langfuse":
+        return LangfuseTracerWrapper(_langfuse_tracer, name)
+    
+    # Otherwise, return the standard OpenTelemetry tracer
     return trace.get_tracer(name)
+
+
+class LangfuseTracerWrapper:
+    """Wrapper to make Langfuse tracer compatible with OpenTelemetry interface."""
+    
+    def __init__(self, langfuse_tracer, name: str):
+        self._langfuse_tracer = langfuse_tracer
+        self._name = name
+    
+    def start_span(self, name: str, **kwargs):
+        """Start a span using Langfuse tracer."""
+        import asyncio
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, create a task
+                return asyncio.create_task(self._langfuse_tracer.start_span(name))
+            else:
+                # If no event loop, run in a new one
+                return asyncio.run(self._langfuse_tracer.start_span(name))
+        except RuntimeError:
+            # No event loop, create a new one
+            return asyncio.run(self._langfuse_tracer.start_span(name))
+    
+    def start_as_current_span(self, name: str, **kwargs):
+        """Start a span as current span with context manager support."""
+        return LangfuseSpanContext(self._langfuse_tracer, name)
+    
+    def get_current_span(self):
+        """Get current span (not implemented in Langfuse tracer)."""
+        return None
+
+
+class LangfuseSpanContext:
+    """Context manager for Langfuse spans."""
+    
+    def __init__(self, langfuse_tracer, name: str):
+        self._langfuse_tracer = langfuse_tracer
+        self._name = name
+        self._span_id = None
+        self._output = None
+    
+    async def __aenter__(self):
+        """Enter the async context."""
+        self._span_id = await self._langfuse_tracer.start_span(self._name)
+        self._wrapper = LangfuseSpanWrapper(self._langfuse_tracer, self._span_id)
+        return self._wrapper
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit the async context."""
+        if self._span_id:
+            output = getattr(self._wrapper, '_output', None) if hasattr(self, '_wrapper') else None
+            await self._langfuse_tracer.end_span(self._span_id, output=output)
+    
+    def __enter__(self):
+        """Enter the context (sync fallback)."""
+        import asyncio
+        
+        # Use the Langfuse client's context manager directly
+        if hasattr(self._langfuse_tracer, '_client') and self._langfuse_tracer._client:
+            self._langfuse_context = self._langfuse_tracer._client.start_as_current_span(name=self._name)
+            self._langfuse_sdk_span = self._langfuse_context.__enter__()
+            # Create our wrapper that wraps the SDK span
+            return LangfuseSpanWrapper(self._langfuse_tracer, None, langfuse_sdk_span=self._langfuse_sdk_span)
+        
+        # Fallback to async approach if no client available
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, this won't work properly
+                # Return a dummy span wrapper
+                return LangfuseSpanWrapper(self._langfuse_tracer, None)
+            else:
+                # Run in a new event loop
+                asyncio.run(self.__aenter__())
+                return self._wrapper
+        except RuntimeError:
+            # No event loop, create a new one
+            asyncio.run(self.__aenter__())
+            return self._wrapper
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context (sync fallback)."""
+        import asyncio
+        
+        # Close the Langfuse SDK context if it was created
+        if hasattr(self, '_langfuse_context'):
+            self._langfuse_context.__exit__(exc_type, exc_val, exc_tb)
+            return
+        
+        # Fallback to async approach
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, this won't work properly
+                return
+            else:
+                # Run in a new event loop
+                asyncio.run(self.__aexit__(exc_type, exc_val, exc_tb))
+        except RuntimeError:
+            # No event loop, create a new one
+            asyncio.run(self.__aexit__(exc_type, exc_val, exc_tb))
+
+
+class LangfuseSpanWrapper:
+    """Wrapper for Langfuse span to provide OpenTelemetry-compatible interface."""
+    
+    def __init__(self, langfuse_tracer, span_id, langfuse_sdk_span=None):
+        self._langfuse_tracer = langfuse_tracer
+        self._span_id = span_id
+        self._langfuse_sdk_span = langfuse_sdk_span
+        self._output = None
+    
+    def set_attribute(self, key: str, value):
+        """Set span attribute."""
+        # If we have the SDK span, use it directly
+        if self._langfuse_sdk_span:
+            try:
+                # Update metadata on the SDK span
+                current_metadata = getattr(self._langfuse_sdk_span, '_metadata', {}) or {}
+                current_metadata[key] = str(value)
+                self._langfuse_sdk_span.update(metadata=current_metadata)
+            except:
+                pass  # Ignore errors for now
+        # Fallback to our custom tracer
+        elif self._span_id and hasattr(self._langfuse_tracer, 'add_tags'):
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._langfuse_tracer.add_tags(self._span_id, {key: str(value)}))
+                else:
+                    asyncio.run(self._langfuse_tracer.add_tags(self._span_id, {key: str(value)}))
+            except:
+                pass  # Ignore errors for now
+    
+    def add_event(self, name: str, attributes=None):
+        """Add event to span."""
+        # Langfuse doesn't have direct event adding, but we can add tags
+        if self._span_id and hasattr(self._langfuse_tracer, 'add_event'):
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._langfuse_tracer.add_event(self._span_id, name, attributes or {}))
+                else:
+                    asyncio.run(self._langfuse_tracer.add_event(self._span_id, name, attributes or {}))
+            except:
+                pass  # Ignore errors for now
+    
+    def set_status(self, status):
+        """Set span status."""
+        # Langfuse doesn't have direct status setting
+        pass
+    
+    def record_exception(self, exception):
+        """Record exception in span."""
+        # Langfuse doesn't have direct exception recording
+        pass
+    
+    def set_output(self, output):
+        """Set span output data."""
+        self._output = output
+        # If we have the SDK span, update it
+        if self._langfuse_sdk_span:
+            try:
+                self._langfuse_sdk_span.update(output=output)
+            except:
+                pass  # Ignore errors for now
 
 
 class TracerMixin:

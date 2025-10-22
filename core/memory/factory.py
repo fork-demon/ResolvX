@@ -12,7 +12,10 @@ from core.exceptions import ConfigurationError, MemoryError
 from core.memory.base import BaseMemory
 from core.memory.faiss_memory import FAISSMemory
 from core.memory.mock_memory import MockMemory
-from core.memory.pinecone_memory import PineconeMemory
+try:
+    from core.memory.pinecone_memory import PineconeMemory
+except Exception:
+    PineconeMemory = None  # Optional
 from core.memory.redis_memory import RedisMemory
 from core.observability import get_logger
 
@@ -29,9 +32,12 @@ class MemoryFactory:
     _backends: Dict[str, Type[BaseMemory]] = {
         "faiss": FAISSMemory,
         "redis": RedisMemory,
-        "pinecone": PineconeMemory,
         "mock": MockMemory,
     }
+
+    # Register pinecone if available
+    if PineconeMemory is not None:
+        _backends["pinecone"] = PineconeMemory
 
     def __init__(self):
         """Initialize the memory factory."""

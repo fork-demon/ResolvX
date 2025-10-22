@@ -4,7 +4,7 @@ Minimal: chooses query based on context; execution can be stubbed unless credent
 """
 
 from typing import Any, Dict, Optional
-from langgraph import StateGraph, END
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from core.graph.base import BaseAgent
@@ -17,7 +17,7 @@ class SplunkAgentState(AgentState):
     result: Dict[str, Any] = Field(default_factory=dict)
 
 
-class SplunkAgent(BaseAgent[SplunkAgentState]):
+class SplunkAgent(BaseAgent):
     def __init__(self, config: Dict[str, Any], **kwargs: Any):
         super().__init__("splunk", config, **kwargs)
         self.logger = get_logger("agent.splunk")

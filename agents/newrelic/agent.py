@@ -4,7 +4,7 @@ Minimal: chooses query based on context; execution is stubbed unless credentials
 """
 
 from typing import Any, Dict, Optional
-from langgraph import StateGraph, END
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from core.graph.base import BaseAgent
@@ -17,7 +17,7 @@ class NewRelicAgentState(AgentState):
     result: Dict[str, Any] = Field(default_factory=dict)
 
 
-class NewRelicAgent(BaseAgent[NewRelicAgentState]):
+class NewRelicAgent(BaseAgent):
     def __init__(self, config: Dict[str, Any], **kwargs: Any):
         super().__init__("newrelic", config, **kwargs)
         self.logger = get_logger("agent.newrelic")

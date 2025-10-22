@@ -12,7 +12,8 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field, validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
 from core.exceptions import ConfigurationError
 
@@ -58,12 +59,13 @@ class RAGConfig(BaseModel):
     backend: str = "llamaindex"
     llamaindex: Optional[Dict[str, Any]] = Field(default_factory=dict)
     langchain: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    local_kb: Optional[Dict[str, Any]] = Field(default_factory=dict)
     mock: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     @validator("backend")
     def validate_backend(cls, v: str) -> str:
         """Validate RAG backend type."""
-        allowed_backends = {"llamaindex", "langchain", "mock"}
+        allowed_backends = {"llamaindex", "langchain", "local_kb", "mock"}
         if v not in allowed_backends:
             raise ValueError(f"Backend must be one of {allowed_backends}")
         return v
@@ -82,13 +84,20 @@ class AgentConfig(BaseModel):
 
     enabled: bool = True
     model: Optional[str] = None
+    type: Optional[str] = None
+    team: Optional[str] = None
     system_prompt: str = ""
     runtime_prompts: Dict[str, str] = Field(default_factory=dict)
+    # accept nested prompts block from YAML as extra, but keep an optional typed handle
+    prompts: Optional[Dict[str, Any]] = None
     tools: list[str] = Field(default_factory=list)
     confidence_threshold: float = 0.8
     max_iterations: int = 10
     timeout: int = 300
     custom_settings: Dict[str, Any] = Field(default_factory=dict)
+
+    # allow extra keys from YAML to remain accessible via attribute access
+    model_config = SettingsConfigDict(extra='allow')
 
 
 class Config(BaseModel):
@@ -121,6 +130,9 @@ class Config(BaseModel):
 class EnvironmentSettings(BaseSettings):
     """Environment-specific settings loaded from environment variables."""
 
+    # Pydantic v2 settings: allow extra env vars and load from .env
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra='ignore')
+
     # Organization settings
     org_name: str = Field(default="your-org", env="ORG_NAME")
 
@@ -149,11 +161,7 @@ class EnvironmentSettings(BaseSettings):
         default=0.9, env="DEFAULT_CONFIDENCE_THRESHOLD_POLLER"
     )
 
-    class Config:
-        """Pydantic configuration."""
-
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    # Note: Pydantic v2 uses model_config; legacy Config removed to avoid conflict
 
 
 def substitute_variables(
@@ -210,6 +218,9 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
     Raises:
         ConfigurationError: If configuration is invalid or cannot be loaded.
     """
+    # Load environment variables from .env file
+    load_dotenv()
+    
     # Load environment settings
     env_settings = EnvironmentSettings()
 
@@ -225,6 +236,11 @@ def load_config(config_path: Optional[Union[str, Path]] = None) -> Config:
             "metrics": env_settings.default_confidence_threshold_metrics,
             "poller": env_settings.default_confidence_threshold_poller,
         },
+        # Add Langfuse environment variables
+        "LANGFUSE_PUBLIC_KEY": os.getenv("LANGFUSE_PUBLIC_KEY", "dev"),
+        "LANGFUSE_SECRET_KEY": os.getenv("LANGFUSE_SECRET_KEY", "dev"),
+        "LANGFUSE_HOST": os.getenv("LANGFUSE_HOST", "http://localhost:3000"),
+        "ENVIRONMENT": os.getenv("ENVIRONMENT", "local"),
     }
 
     # Determine config file path

@@ -11,6 +11,13 @@ Prompt-driven, central-gateway-aware agents for support workflows. Minimal, clea
 - Domain Glossary: YAML-driven entity hints (GTIN, TPNB, location clusters)
 - Local Mocks for offline testing
 
+## Documentation
+
+- Architecture: `docs/architecture.md`
+- Agents: `docs/agents.md`
+- Demo Walkthrough: `docs/demo_walkthrough.md`
+- Q&A / Design Patterns: `docs/qna_design.md`
+
 ## Quick Start (Local)
 
 1) Install (uv)
@@ -144,6 +151,12 @@ Glossary drives entity extraction (GTIN/TPNB/location clusters) and tool suggest
 - Local mocks: `core/mocks/tools.py` (Splunk/New Relic/Zendesk).
 - Team local tools: `core/tools/team_tools.py` (add functions, declare in `gateway.tools`).
 - Optional local Zendesk MCP (dev-only): `extensions/mcp_servers/zendesk_tools.py` kept for testing, but agents should still call via ToolRegistry.
+
+### Mock Tickets for Demos
+Sample tickets for presentations are under `data/mock_tickets/`:
+- `001_login_errors.json`
+- `002_price_mismatch.json`
+- `003_location_outage.json`
 
 ## Repository Structure (minimal)
 ```

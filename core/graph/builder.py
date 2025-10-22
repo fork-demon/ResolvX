@@ -8,9 +8,7 @@ conditional routing, and error handling.
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.graph import CompiledGraph
 from langgraph.checkpoint.memory import MemorySaver
-
 from core.config import Config
 from core.exceptions import AgentError
 from core.graph.state import AgentState, WorkflowState
@@ -255,7 +253,7 @@ class GraphBuilder:
         graph: StateGraph,
         checkpointer: Optional[Any] = None,
         debug: bool = False,
-    ) -> CompiledGraph:
+    ) -> Any:
         """
         Compile a StateGraph for execution.
 

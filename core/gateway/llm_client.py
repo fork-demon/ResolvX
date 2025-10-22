@@ -366,32 +366,33 @@ class LLMGatewayClient:
 
     def _get_gateway_url(self) -> str:
         """Get LLM gateway URL from configuration."""
-        if self.config and self.config.gateway.llm_gateway:
-            return self.config.gateway.llm_gateway.get("url", "http://localhost:8000")
+        # self.config is a GatewayConfig when passed from AgentManager
+        if self.config and getattr(self.config, 'llm_gateway', None):
+            return self.config.llm_gateway.get("url", "http://localhost:8000")
         return "http://localhost:8000"
 
     def _get_default_model(self) -> str:
         """Get default model from configuration."""
-        if self.config and self.config.gateway.llm_gateway:
-            return self.config.gateway.llm_gateway.get("default_model", "gpt-4")
+        if self.config and getattr(self.config, 'llm_gateway', None):
+            return self.config.llm_gateway.get("default_model", "gpt-4")
         return "gpt-4"
 
     def _get_timeout(self) -> int:
         """Get timeout from configuration."""
-        if self.config and self.config.gateway.llm_gateway:
-            return self.config.gateway.llm_gateway.get("timeout", 60)
+        if self.config and getattr(self.config, 'llm_gateway', None):
+            return self.config.llm_gateway.get("timeout", 60)
         return 60
 
     def _get_retry_attempts(self) -> int:
         """Get retry attempts from configuration."""
-        if self.config and self.config.gateway.llm_gateway:
-            return self.config.gateway.llm_gateway.get("retry_attempts", 2)
+        if self.config and getattr(self.config, 'llm_gateway', None):
+            return self.config.llm_gateway.get("retry_attempts", 2)
         return 2
 
     def _get_auth_config(self) -> Dict[str, Any]:
         """Get authentication configuration."""
-        if self.config and self.config.gateway.llm_gateway:
-            return self.config.gateway.llm_gateway.get("auth", {})
+        if self.config and getattr(self.config, 'llm_gateway', None):
+            return self.config.llm_gateway.get("auth", {})
         return {}
 
 

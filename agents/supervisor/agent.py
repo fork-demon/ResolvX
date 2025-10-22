@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Union, Callable
 from enum import Enum
 
-from langgraph import StateGraph
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from core.config import Config
@@ -19,8 +19,8 @@ from core.graph.base import BaseAgent, BaseCoordinator
 from core.graph.state import AgentState, ConversationState
 from core.graph.coordinator import SupervisorCoordinator
 from core.memory.base import BaseMemory
-from core.observability import get_logger, get_tracer, get_metrics
-from extensions.rag_backends.base import BaseRAG
+from core.observability import get_logger, get_tracer, get_metrics_client
+from typing import Any as BaseRAG
 
 
 class TaskStatus(str, Enum):
@@ -117,7 +117,7 @@ class SupervisorState(AgentState):
     last_health_check: Optional[datetime] = Field(description="Last health check timestamp")
 
 
-class SupervisorAgent(BaseAgent[SupervisorState]):
+class SupervisorAgent(BaseAgent):
     """
     Agent for supervising and coordinating multi-agent workflows.
 
@@ -137,7 +137,7 @@ class SupervisorAgent(BaseAgent[SupervisorState]):
 
         self.logger = get_logger("agents.supervisor")
         self.tracer = get_tracer("agents.supervisor")
-        self.metrics = get_metrics()
+        self.metrics = get_metrics_client()
 
         # Supervisor configuration
         self.max_concurrent_tasks = config.agents.get("supervisor", {}).get("max_concurrent", 20)

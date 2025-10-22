@@ -17,7 +17,7 @@ from core.graph.state import AgentState
 from core.gateway.tool_registry import ToolRegistry
 from core.observability import get_logger, get_tracer, get_metrics_client
 from core.memory.base import BaseMemory
-from extensions.rag_backends.base import BaseRAG
+from core.rag.local_kb import LocalKB
 
 
 class TriageAgent(BaseAgent):
@@ -36,7 +36,7 @@ class TriageAgent(BaseAgent):
         config: AgentConfig,
         tool_registry: Optional[ToolRegistry] = None,
         memory: Optional[BaseMemory] = None,
-        rag: Optional[BaseRAG] = None,
+        rag: Optional[Any] = None,
         **kwargs: Any,
     ):
         """
@@ -54,6 +54,16 @@ class TriageAgent(BaseAgent):
         self.tool_registry = tool_registry
         self.memory = memory
         self.rag = rag
+        # Auto-load LocalKB if configured externally passed as None
+        try:
+            if self.rag is None:
+                from core.config import Config
+                # This agent doesn't have direct config object; rely on defaults
+                kb = LocalKB(knowledge_dir="kb", model_name="all-MiniLM-L6-v2")
+                kb.load()
+                self.rag = kb
+        except Exception:
+            pass
         self.tracer = get_tracer("agent.triage")
         self.metrics = get_metrics_client()
 
@@ -132,16 +142,20 @@ class TriageAgent(BaseAgent):
             keywords = self._extract_keywords(combined_text)
             entities = self._extract_entities(combined_text)
 
-            # Check for historical patterns if RAG is available
+            # Check for KB guidance if RAG is available
             similar_incidents = []
             if self.rag:
                 try:
-                    rag_result = await self.rag.search_and_generate(
-                        query=combined_text,
-                        max_results=3,
-                        namespace="incidents"
-                    )
-                    similar_incidents = rag_result.sources
+                    # LocalKB has synchronous search; support both patterns
+                    if hasattr(self.rag, "search"):
+                        similar_incidents = self.rag.search(combined_text, k=3)
+                    else:
+                        rag_result = await self.rag.search_and_generate(
+                            query=combined_text,
+                            max_results=3,
+                            namespace="incidents"
+                        )
+                        similar_incidents = rag_result.sources
                 except Exception as e:
                     self.logger.warning(f"RAG search failed: {e}")
 
