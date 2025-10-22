@@ -13,7 +13,7 @@ from enum import Enum
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from core.config import Config
+from core.config import Config, AgentConfig
 from core.exceptions import AgentError, ToolError
 from core.graph.base import BaseAgent, BaseCoordinator
 from core.graph.state import AgentState, ConversationState
@@ -127,30 +127,149 @@ class SupervisorAgent(BaseAgent):
 
     def __init__(
         self,
-        config: Config,
+        config: Union[Config, AgentConfig],
         memory: Optional[BaseMemory] = None,
         rag: Optional[BaseRAG] = None,
         **kwargs
     ):
         """Initialize the supervisor agent."""
-        super().__init__(config, memory, rag, **kwargs)
+        # If we get an AgentConfig, wrap it
+        if isinstance(config, AgentConfig):
+            agent_config = config
+            # Create minimal Config wrapper
+            from core.config import Config as FullConfig
+            full_config = FullConfig()
+            super().__init__("supervisor", agent_config, **kwargs)
+        else:
+            full_config = config
+            super().__init__(config, memory, rag, **kwargs)
 
         self.logger = get_logger("agents.supervisor")
         self.tracer = get_tracer("agents.supervisor")
         self.metrics = get_metrics_client()
 
         # Supervisor configuration
-        self.max_concurrent_tasks = config.agents.get("supervisor", {}).get("max_concurrent", 20)
-        self.health_check_interval = config.agents.get("supervisor", {}).get("health_check_interval", 30)
-        self.task_timeout_default = config.agents.get("supervisor", {}).get("default_timeout", 300)
+        self.max_concurrent_tasks = getattr(config, "max_concurrent", 20)
+        self.health_check_interval = getattr(config, "health_check_interval", 30)
+        self.task_timeout_default = getattr(config, "default_timeout", 300)
 
         # Agent management
         self._managed_agents: Dict[str, BaseAgent] = {}
         self._agent_tasks: Dict[str, Set[asyncio.Task]] = {}
         self._task_semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
 
-        # Coordinator
-        self.coordinator = SupervisorCoordinator(config)
+        # Coordinator (only if full config available)
+        self.coordinator = None
+        if isinstance(full_config, Config):
+            self.coordinator = SupervisorCoordinator(full_config)
+    
+    def build_graph(self):
+        """Build a simple graph for the supervisor agent."""
+        from langgraph.graph import StateGraph, END
+        graph = StateGraph(AgentState)
+        
+        # Simple single-node graph for supervisor
+        graph.add_node("make_decision", self._make_decision_node)
+        graph.set_entry_point("make_decision")
+        graph.add_edge("make_decision", END)
+        
+        return graph.compile()
+    
+    async def _make_decision_node(self, state: AgentState) -> AgentState:
+        """LangGraph node for making decisions."""
+        decision = self._make_final_decision(state.input_data)
+        state.metadata["decision"] = decision
+        state.increment_step()
+        return state
+    
+    async def process(self, state: AgentState) -> Dict[str, Any]:
+        """Process enriched ticket data and make final decision."""
+        with self.tracer.start_as_current_span("supervisor_process") as span:
+            # Set input data
+            input_data = {
+                "ticket_id": state.input_data.get("ticket_id", "unknown"),
+                "triage_severity": state.input_data.get("severity", "unknown"),
+                "triage_routing": state.input_data.get("routing_decision", "unknown"),
+                "tools_used": state.input_data.get("tools_used", []),
+                "enrichment_sources": state.input_data.get("enrichment_sources", {})
+            }
+            span.set_input(input_data)
+            span.set_attribute("ticket_id", input_data["ticket_id"])
+            span.set_attribute("severity", input_data["triage_severity"])
+            
+            try:
+                # Make final decision based on enriched data
+                decision = self._make_final_decision(state.input_data)
+                
+                # Set output data
+                output_data = {
+                    "decision": decision["action"],
+                    "reason": decision["reason"],
+                    "assigned_to": decision.get("assigned_to"),
+                    "escalated": decision.get("escalated", False),
+                    "ticket_id": input_data["ticket_id"],
+                    "success": True
+                }
+                span.set_output(output_data)
+                span.set_attribute("decision", decision["action"])
+                span.set_attribute("escalated", decision.get("escalated", False))
+                
+                self.logger.info(f"Supervisor decision for {input_data['ticket_id']}: {decision['action']}")
+                
+                return {
+                    "success": True,
+                    "decision": decision,
+                    "ticket_id": input_data["ticket_id"]
+                }
+                
+            except Exception as e:
+                span.record_exception(e)
+                span.set_output({"success": False, "error": str(e), "ticket_id": input_data["ticket_id"]})
+                self.logger.error(f"Supervisor processing failed: {e}")
+                raise AgentError(f"Supervisor processing failed: {e}") from e
+    
+    def _make_final_decision(self, enriched_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Make final decision based on enriched ticket data."""
+        severity = enriched_data.get("severity", "medium")
+        routing = enriched_data.get("routing_decision", "unknown")
+        tools_used = enriched_data.get("tools_used", [])
+        
+        # Decision logic
+        if severity == "critical":
+            return {
+                "action": "ESCALATE_TO_HUMAN",
+                "reason": "Critical severity requires human intervention",
+                "escalated": True,
+                "assigned_to": "oncall_engineer"
+            }
+        elif severity == "high" and "splunk_search" in tools_used:
+            return {
+                "action": "ASSIGN_TO_TEAM",
+                "reason": "High severity with error logs found - assign to engineering team",
+                "escalated": False,
+                "assigned_to": "engineering_team"
+            }
+        elif "newrelic_metrics" in tools_used:
+            return {
+                "action": "ASSIGN_TO_TEAM",
+                "reason": "Performance issue detected - assign to devops team",
+                "escalated": False,
+                "assigned_to": "devops_team"
+            }
+        elif routing in ["security", "infrastructure"]:
+            return {
+                "action": "ROUTE_TO_SPECIALIST",
+                "reason": f"Requires specialist attention: {routing}",
+                "escalated": False,
+                "assigned_to": f"{routing}_team"
+            }
+        else:
+            return {
+                "action": "ADD_COMMENT",
+                "reason": "Automated analysis complete - adding findings to ticket",
+                "escalated": False,
+                "assigned_to": None
+            }
 
     async def initialize(self) -> None:
         """Initialize the supervisor agent."""

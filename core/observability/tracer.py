@@ -261,6 +261,7 @@ class LangfuseSpanWrapper:
         self._langfuse_tracer = langfuse_tracer
         self._span_id = span_id
         self._langfuse_sdk_span = langfuse_sdk_span
+        self._input = None
         self._output = None
     
     def set_attribute(self, key: str, value):
@@ -309,6 +310,16 @@ class LangfuseSpanWrapper:
         """Record exception in span."""
         # Langfuse doesn't have direct exception recording
         pass
+    
+    def set_input(self, input_data):
+        """Set span input data."""
+        self._input = input_data
+        # If we have the SDK span, update it
+        if self._langfuse_sdk_span:
+            try:
+                self._langfuse_sdk_span.update(input=input_data)
+            except:
+                pass  # Ignore errors for now
     
     def set_output(self, output):
         """Set span output data."""

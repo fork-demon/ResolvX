@@ -68,9 +68,30 @@ class MemoryAgent(BaseAgent):
 
     async def process(self, state: MemoryAgentState) -> Dict[str, Any]:
         with self.tracer.start_as_current_span("memory_agent_process") as span:
+            # Set input data
+            input_data = {
+                "ticket_id": state.input_data.get("ticket", {}).get("id", "unknown"),
+                "ticket_title": state.input_data.get("ticket", {}).get("title", ""),
+                "ticket_description": state.input_data.get("ticket", {}).get("description", ""),
+                "team": state.input_data.get("team", "unknown"),
+                "search_terms": state.input_data.get("search_terms", [])
+            }
+            span.set_input(input_data)
             span.set_attribute("ticket_id", state.input_data.get("ticket", {}).get("id", "unknown"))
+            
             result = await self.graph.ainvoke(state.dict())
+            
+            # Set output data
+            output_data = {
+                "related_count": len(result.get("related_tickets", [])),
+                "action": result.get("action", "unknown"),
+                "related_tickets": result.get("related_tickets", []),
+                "success": result.get("success", True),
+                "ticket_id": state.input_data.get("ticket", {}).get("id", "unknown")
+            }
+            span.set_output(output_data)
             span.set_attribute("related_count", len(result.get("related_tickets", [])))
+            
             return result
 
     def _reset_cache_if_needed(self):

@@ -103,95 +103,240 @@ class TriageAgent(BaseAgent):
         # Set entry point
         graph.set_entry_point("analyze_incident")
 
-        return graph
+        # Compile and return the graph
+        return graph.compile()
 
     async def process(self, state: AgentState) -> Dict[str, Any]:
         """Process an incident through the triage workflow."""
         with self.tracer.start_as_current_span("triage_process") as span:
+            # Set input data
+            input_data = {
+                "incident_id": state.input_data.get("incident_id", "unknown"),
+                "tickets": state.input_data.get("tickets", []),
+                "context": state.input_data.get("context", {}),
+                "ticket_count": len(state.input_data.get("tickets", []))
+            }
+            span.set_input(input_data)
             span.set_attribute("incident_id", state.input_data.get("incident_id", "unknown"))
 
             try:
                 # Execute the graph
                 result = await self.graph.ainvoke(state.dict())
 
-                span.set_attribute("severity", result.get("severity", "unknown"))
-                span.set_attribute("routing_decision", result.get("routing_decision", "unknown"))
+                # Extract enriched data from result
+                analysis = result.get("metadata", {}).get("analysis", {})
+                severity_data = result.get("metadata", {}).get("severity", {})
+                routing_data = result.get("metadata", {}).get("routing", {})
+                
+                # Set output data with enrichment details
+                output_data = {
+                    "severity": severity_data.get("severity", "unknown"),
+                    "routing_decision": routing_data.get("routing_decision", "unknown"),
+                    "tickets_processed": len(state.input_data.get("tickets", [])),
+                    "success": result.get("success", True),
+                    "decisions": result.get("decisions", []),
+                    "llm_used": bool(analysis.get("llm_analysis")),
+                    "tools_used": analysis.get("tools_used", []),
+                    "enrichment_sources": {
+                        "llm": bool(analysis.get("llm_analysis")),
+                        "rag": bool(analysis.get("similar_incidents")),
+                        "splunk": bool(analysis.get("splunk_data")),
+                        "newrelic": bool(analysis.get("newrelic_data"))
+                    }
+                }
+                span.set_output(output_data)
+                span.set_attribute("severity", severity_data.get("severity", "unknown"))
+                span.set_attribute("routing_decision", routing_data.get("routing_decision", "unknown"))
+                span.set_attribute("tools_used_count", len(analysis.get("tools_used", [])))
 
                 return result
 
             except Exception as e:
                 span.record_exception(e)
+                # Set error output
+                span.set_output({"success": False, "error": str(e), "incident_id": state.input_data.get("incident_id", "unknown")})
                 self.logger.error(f"Triage processing failed: {e}")
                 raise AgentError(f"Triage processing failed: {e}") from e
 
     async def _analyze_incident(self, state: AgentState) -> AgentState:
-        """Analyze the incoming incident to extract key information."""
+        """Analyze the incoming incident using LLM and tools."""
         try:
-            incident_data = state.input_data
-
+            # Get tickets from input
+            tickets = state.input_data.get("tickets", [])
+            if not tickets:
+                self.logger.warning("No tickets to analyze")
+                return state
+            
+            ticket = tickets[0]  # Process first ticket
+            
             # Extract basic information
-            title = incident_data.get("title", "")
-            description = incident_data.get("description", "")
-            source = incident_data.get("source", "unknown")
-            timestamp = incident_data.get("timestamp", time.time())
-
+            title = ticket.get("subject", "")
+            description = ticket.get("description", "")
+            source = ticket.get("source", "unknown")
+            ticket_id = ticket.get("id", "unknown")
+            
             # Perform text analysis
             combined_text = f"{title} {description}".lower()
-
+            
             # Extract keywords and entities
             keywords = self._extract_keywords(combined_text)
             entities = self._extract_entities(combined_text)
+            
+            # Use LLM for intelligent analysis if available
+            llm_analysis = None
+            if self.tool_registry:
+                try:
+                    # Get LLM client from tool registry config
+                    from core.gateway.llm_client import LLMGatewayClient, ChatMessage
+                    from core.config import load_config
+                    config = load_config()
+                    llm_client = LLMGatewayClient(config.gateway)
+                    await llm_client.initialize()
+                    
+                    # Build analysis prompt
+                    prompt = f"""Analyze this support ticket and provide:
+1. Severity assessment (critical/high/medium/low)
+2. Category (infrastructure/application/security/support)
+3. Recommended tools to use (splunk_search, newrelic_metrics, or none)
+4. Brief reasoning
 
+Ticket ID: {ticket_id}
+Subject: {title}
+Description: {description[:500]}
+Source: {source}
+
+Respond in JSON format."""
+                    
+                    messages = [
+                        ChatMessage(role="system", content="You are a triage agent analyzing support tickets."),
+                        ChatMessage(role="user", content=prompt)
+                    ]
+                    
+                    response = await llm_client.chat_completion(
+                        messages=messages,
+                        model="llama3.2",
+                        temperature=0.1,
+                        max_tokens=500
+                    )
+                    
+                    # Extract content from response
+                    if isinstance(response, dict):
+                        llm_analysis = response.get("content", "")
+                    else:
+                        llm_analysis = getattr(response, "content", str(response))
+                    self.logger.info(f"LLM analysis completed for {ticket_id}")
+                    
+                except Exception as e:
+                    self.logger.warning(f"LLM analysis failed: {e}")
+            
             # Check for KB guidance if RAG is available
             similar_incidents = []
             if self.rag:
                 try:
-                    # LocalKB has synchronous search; support both patterns
                     if hasattr(self.rag, "search"):
                         similar_incidents = self.rag.search(combined_text, k=3)
-                    else:
-                        rag_result = await self.rag.search_and_generate(
-                            query=combined_text,
-                            max_results=3,
-                            namespace="incidents"
-                        )
-                        similar_incidents = rag_result.sources
                 except Exception as e:
                     self.logger.warning(f"RAG search failed: {e}")
-
+            
+            # Call Splunk if error-related
+            splunk_data = None
+            if self.tool_registry and any(keyword in combined_text for keyword in ["error", "failed", "timeout", "exception"]):
+                try:
+                    splunk_data = await self.tool_registry.call_tool(
+                        "splunk_search",
+                        {
+                            "query": f"index=* {ticket_id} error OR failed",
+                            "earliest_time": "-1h",
+                            "latest_time": "now"
+                        }
+                    )
+                    self.logger.info(f"Splunk search completed for {ticket_id}")
+                except Exception as e:
+                    self.logger.warning(f"Splunk search failed: {e}")
+            
+            # Call NewRelic if performance-related
+            newrelic_data = None
+            if self.tool_registry and any(keyword in combined_text for keyword in ["slow", "performance", "memory", "cpu"]):
+                try:
+                    newrelic_data = await self.tool_registry.call_tool(
+                        "newrelic_metrics",
+                        {
+                            "nrql": "SELECT average(duration) FROM Transaction WHERE appName LIKE '%price%' SINCE 1 hour ago",
+                            "account_id": "default"
+                        }
+                    )
+                    self.logger.info(f"NewRelic query completed for {ticket_id}")
+                except Exception as e:
+                    self.logger.warning(f"NewRelic query failed: {e}")
+            
             # Store analysis results
             analysis = {
+                "ticket_id": ticket_id,
                 "keywords": keywords,
                 "entities": entities,
+                "llm_analysis": llm_analysis,
                 "similar_incidents": similar_incidents,
+                "splunk_data": splunk_data,
+                "newrelic_data": newrelic_data,
                 "text_length": len(combined_text),
                 "source": source,
                 "analyzed_at": time.time(),
+                "tools_used": []
             }
-
+            
+            if splunk_data:
+                analysis["tools_used"].append("splunk_search")
+            if newrelic_data:
+                analysis["tools_used"].append("newrelic_metrics")
+            
             state.add_intermediate_result({
                 "step": "analyze_incident",
                 "analysis": analysis,
             })
-
+            
             # Update state
             state.metadata["analysis"] = analysis
             state.increment_step()
-
-            self.logger.info(f"Analyzed incident: {len(keywords)} keywords, {len(entities)} entities")
+            
+            self.logger.info(f"Analyzed incident {ticket_id}: {len(keywords)} keywords, {len(entities)} entities, {len(analysis['tools_used'])} tools used")
             return state
-
+            
         except Exception as e:
             state.add_error(f"Incident analysis failed: {e}", "analysis_error")
             raise
 
     async def _determine_severity(self, state: AgentState) -> AgentState:
-        """Determine the severity level of the incident."""
+        """Determine the severity level using LLM analysis and heuristics."""
         try:
             analysis = state.metadata.get("analysis", {})
             keywords = analysis.get("keywords", [])
-
-            # Calculate severity scores
+            llm_analysis = analysis.get("llm_analysis", "")
+            
+            # Try to extract severity from LLM analysis
+            severity = "medium"  # default
+            if llm_analysis:
+                import json
+                import re
+                
+                # Try to parse JSON from LLM response
+                try:
+                    # Extract JSON block if present
+                    json_match = re.search(r'\{[^{}]*\}', llm_analysis, re.DOTALL)
+                    if json_match:
+                        llm_json = json.loads(json_match.group(0))
+                        severity = llm_json.get("severity", "medium").lower()
+                        self.logger.info(f"LLM determined severity: {severity}")
+                except:
+                    # Fallback to keyword matching in LLM response
+                    llm_lower = llm_analysis.lower()
+                    if "critical" in llm_lower:
+                        severity = "critical"
+                    elif "high" in llm_lower:
+                        severity = "high"
+                    elif "low" in llm_lower:
+                        severity = "low"
+            
+            # Calculate severity scores as fallback/validation
             severity_scores = {
                 "critical": 0,
                 "high": 0,
@@ -201,26 +346,28 @@ class TriageAgent(BaseAgent):
 
             # Score based on keywords
             for keyword in keywords:
-                for severity, severity_keywords in self.severity_keywords.items():
+                for sev, severity_keywords in self.severity_keywords.items():
                     if any(sk in keyword for sk in severity_keywords):
-                        severity_scores[severity] += 1
+                        severity_scores[sev] += 1
+
+            # Score based on tools that found issues
+            if analysis.get("splunk_data"):
+                severity_scores["high"] += 2  # Errors found in logs
+            if analysis.get("newrelic_data"):
+                severity_scores["medium"] += 1  # Performance metrics available
 
             # Score based on time sensitivity
-            incident_data = state.input_data
-            if incident_data.get("urgent", False):
-                severity_scores["critical"] += 2
+            tickets = state.input_data.get("tickets", [])
+            if tickets and tickets[0].get("priority", "").startswith("P1"):
+                severity_scores["critical"] += 3
+            elif tickets and tickets[0].get("priority", "").startswith("P2"):
+                severity_scores["high"] += 2
 
-            # Score based on similar incidents
-            similar_incidents = analysis.get("similar_incidents", [])
-            for incident in similar_incidents:
-                if incident.get("score", 0) > 0.8:  # High similarity
-                    # Inherit severity from similar incident
-                    similar_severity = incident.get("metadata", {}).get("severity", "medium")
-                    severity_scores[similar_severity] += 1
-
-            # Determine final severity
-            severity = max(severity_scores, key=severity_scores.get)
-            confidence = severity_scores[severity] / (sum(severity_scores.values()) + 1)
+            # Use heuristic if LLM didn't provide clear answer
+            if severity == "medium" and sum(severity_scores.values()) > 0:
+                severity = max(severity_scores, key=severity_scores.get)
+            
+            confidence = severity_scores.get(severity, 0) / (sum(severity_scores.values()) + 1)
 
             # Store severity decision
             severity_decision = {

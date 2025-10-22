@@ -198,17 +198,49 @@ class LLMGatewayClient:
 
         try:
             with self.tracer.start_as_current_span("llm_chat_completion") as span:
+                # Set input data
+                input_data = {
+                    "model": request.model,
+                    "message_count": len(messages),
+                    "messages": [{"role": msg.role, "content": msg.content} for msg in normalized_messages],
+                    "temperature": request.temperature,
+                    "max_tokens": request.max_tokens,
+                    "stream": stream
+                }
+                span.set_input(input_data)
                 span.set_attribute("model", request.model)
                 span.set_attribute("message_count", len(messages))
                 span.set_attribute("stream", stream)
 
                 if stream:
-                    return await self._stream_completion(request)
+                    result = await self._stream_completion(request)
                 else:
-                    return await self._complete_completion(request)
+                    result = await self._complete_completion(request)
+
+                # Set output data
+                if isinstance(result, ChatCompletionResponse):
+                    output_data = {
+                        "success": True,
+                        "model": request.model,
+                        "response_length": len(result.choices[0].get("message", {}).get("content", "")) if result.choices else 0,
+                        "usage": result.usage,
+                        "finish_reason": result.choices[0].get("finish_reason") if result.choices else None
+                    }
+                else:
+                    output_data = {
+                        "success": True,
+                        "model": request.model,
+                        "stream": True
+                    }
+                span.set_output(output_data)
+
+                return result
 
         except Exception as e:
             self.logger.error(f"Chat completion failed: {e}")
+            # Set error output
+            if 'span' in locals():
+                span.set_output({"success": False, "error": str(e), "model": request.model})
             raise GatewayError(f"Chat completion failed: {e}") from e
 
     async def _complete_completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:

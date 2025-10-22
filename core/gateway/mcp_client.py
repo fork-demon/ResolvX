@@ -186,6 +186,14 @@ class MCPClient:
 
         try:
             with self.tracer.start_as_current_span(f"mcp_tool_{tool_name}") as span:
+                # Set input data
+                input_data = {
+                    "tool_name": tool_name,
+                    "parameters": parameters,
+                    "gateway_url": self.gateway_url,
+                    "timeout": timeout
+                }
+                span.set_input(input_data)
                 span.set_attribute("tool_name", tool_name)
                 span.set_attribute("gateway_url", self.gateway_url)
 
@@ -199,11 +207,22 @@ class MCPClient:
                     fallback=self._execute_local_fallback if self.fallback_mode == "local" else None,
                 )
 
+                # Set output data
+                output_data = {
+                    "success": True,
+                    "tool_name": tool_name,
+                    "result": result
+                }
+                span.set_output(output_data)
+
                 self.logger.debug(f"Tool {tool_name} executed successfully")
                 return result
 
         except Exception as e:
             self.logger.error(f"Tool execution failed for {tool_name}: {e}")
+            # Set error output
+            if 'span' in locals():
+                span.set_output({"success": False, "error": str(e), "tool_name": tool_name})
             raise ToolError(f"Tool {tool_name} execution failed: {e}") from e
 
     async def _execute_tool_request(

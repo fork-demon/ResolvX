@@ -221,12 +221,27 @@ class ZendeskPollerAgent(BaseAgent):
     async def process(self, state: ZendeskPollerState) -> Dict[str, Any]:
         """Process a Zendesk polling request through the workflow."""
         with self.tracer.start_as_current_span("zendesk_poller_process") as span:
+            # Set input data
+            input_data = {
+                "team": state.input_data.get("team", "unknown"),
+                "queues_to_poll": state.queues_to_poll,
+                "poll_interval": state.poll_interval
+            }
+            span.set_input(input_data)
             span.set_attribute("team", state.input_data.get("team", "unknown"))
 
             try:
                 # Execute the graph
                 result = await self.graph.ainvoke(state.dict())
 
+                # Set output data
+                output_data = {
+                    "tickets_forwarded": len(result.get("tickets", [])),
+                    "success": result.get("success", False),
+                    "ticket_count": len(result.get("tickets", [])),
+                    "queues_polled": len(state.queues_to_poll)
+                }
+                span.set_output(output_data)
                 span.set_attribute("tickets_forwarded", len(result.get("tickets", [])))
                 span.set_attribute("success", result.get("success", False))
 
@@ -235,6 +250,8 @@ class ZendeskPollerAgent(BaseAgent):
             except Exception as e:
                 self.logger.error(f"ZendeskPollerAgent error: {str(e)}")
                 span.record_exception(e)
+                # Set error output
+                span.set_output({"success": False, "error": str(e)})
                 raise AgentError(f"Zendesk polling failed: {str(e)}")
 
     async def _check_queues(self, state: ZendeskPollerState) -> Dict[str, Any]:
