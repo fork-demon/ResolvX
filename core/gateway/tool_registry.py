@@ -336,7 +336,24 @@ class ToolRegistry:
         return matches
 
     async def _load_local_tools(self) -> None:
-        """Load local tools from configuration."""
+        """Load local tools from configuration and built-in tools."""
+        
+        # Always load built-in SharePoint tools
+        try:
+            from core.tools.sharepoint_tool import create_sharepoint_tools
+            sharepoint_config = {}
+            if self.config and hasattr(self.config, 'sharepoint'):
+                sharepoint_config = self.config.sharepoint
+            
+            sharepoint_tools = create_sharepoint_tools(sharepoint_config)
+            for tool in sharepoint_tools:
+                await self.register_tool(tool, tool_type="local")
+            
+            self.logger.info(f"Registered {len(sharepoint_tools)} SharePoint tools")
+        except Exception as e:
+            self.logger.warning(f"Failed to load SharePoint tools: {e}")
+        
+        # Load additional local tools from configuration
         tools_cfg: Optional[Dict[str, Any]] = None
         if not self.config:
             return

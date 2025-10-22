@@ -182,34 +182,91 @@ class TriageAgent(BaseAgent):
             keywords = self._extract_keywords(combined_text)
             entities = self._extract_entities(combined_text)
             
-            # Use LLM for intelligent analysis if available
+            # STEP 1: Check KB/RAG for runbook guidance FIRST
+            similar_incidents = []
+            runbook_guidance = ""
+            if self.rag:
+                with self.tracer.start_as_current_span("rag_knowledge_search") as rag_span:
+                    # Set RAG search input
+                    rag_input = {
+                        "ticket_id": ticket_id,
+                        "query": combined_text[:200],
+                        "k": 3,
+                        "search_type": "runbook_lookup"
+                    }
+                    rag_span.set_input(rag_input)
+                    
+                    try:
+                        if hasattr(self.rag, "search"):
+                            similar_incidents = self.rag.search(combined_text, k=3)
+                            # Extract runbook guidance from top result
+                            if similar_incidents:
+                                for incident in similar_incidents[:2]:  # Top 2 results
+                                    runbook_guidance += f"\n### Relevant Runbook:\n{incident.get('text', '')[:1000]}\n"
+                            
+                            # Set RAG search output
+                            rag_output = {
+                                "results_found": len(similar_incidents),
+                                "top_scores": [inc.get("score", 0) for inc in similar_incidents[:3]],
+                                "runbook_names": [inc.get("metadata", {}).get("source", "unknown") for inc in similar_incidents[:3]],
+                                "success": True
+                            }
+                            rag_span.set_output(rag_output)
+                            rag_span.set_attribute("results_found", len(similar_incidents))
+                            
+                            self.logger.info(f"RAG search found {len(similar_incidents)} similar incidents")
+                    except Exception as e:
+                        rag_span.set_output({"success": False, "error": str(e)})
+                        rag_span.record_exception(e)
+                        self.logger.warning(f"RAG search failed: {e}")
+            
+            # STEP 2: Use LLM with runbook context to decide which tools to use
             llm_analysis = None
+            tools_to_call = []
             if self.tool_registry:
                 try:
-                    # Get LLM client from tool registry config
+                    # Get LLM client
                     from core.gateway.llm_client import LLMGatewayClient, ChatMessage
                     from core.config import load_config
                     config = load_config()
                     llm_client = LLMGatewayClient(config.gateway)
                     await llm_client.initialize()
                     
-                    # Build analysis prompt
-                    prompt = f"""Analyze this support ticket and provide:
-1. Severity assessment (critical/high/medium/low)
-2. Category (infrastructure/application/security/support)
-3. Recommended tools to use (splunk_search, newrelic_metrics, or none)
-4. Brief reasoning
+                    # Build analysis prompt with runbook context
+                    system_prompt = """You are an intelligent triage agent analyzing support tickets.
+Based on the ticket details and runbook guidance, recommend which diagnostic tools to use.
 
-Ticket ID: {ticket_id}
+Available tools:
+- splunk_search: Search application logs for errors, exceptions, failures
+- newrelic_metrics: Query performance metrics, memory, CPU, response times
+- base_prices_get: Retrieve current price data for a product
+- competitor_prices_get: Get competitor pricing data
+- basket_segment_get: Get basket segment classification
+- sharepoint_list_files: List files/folders in SharePoint directory
+- sharepoint_download_file: Download runbooks or documentation from SharePoint
+- sharepoint_upload_file: Upload files to SharePoint (e.g., analysis reports)
+- sharepoint_search_documents: Search SharePoint for related documentation
+
+Your response must be valid JSON with this format:
+{
+  "severity": "critical|high|medium|low",
+  "category": "infrastructure|application|security|support",
+  "tools_to_use": ["tool_name1", "tool_name2"],
+  "reasoning": "Brief explanation of why these tools"
+}"""
+                    
+                    user_prompt = f"""Ticket ID: {ticket_id}
 Subject: {title}
 Description: {description[:500]}
 Source: {source}
 
-Respond in JSON format."""
+{runbook_guidance if runbook_guidance else "No runbook guidance available."}
+
+Analyze this ticket and recommend which diagnostic tools to use."""
                     
                     messages = [
-                        ChatMessage(role="system", content="You are a triage agent analyzing support tickets."),
-                        ChatMessage(role="user", content=prompt)
+                        ChatMessage(role="system", content=system_prompt),
+                        ChatMessage(role="user", content=user_prompt)
                     ]
                     
                     response = await llm_client.chat_completion(
@@ -219,55 +276,152 @@ Respond in JSON format."""
                         max_tokens=500
                     )
                     
-                    # Extract content from response
-                    if isinstance(response, dict):
+                    # Extract content from response (ChatCompletionResponse object)
+                    llm_analysis = ""
+                    if hasattr(response, "choices") and response.choices:
+                        # Extract from ChatCompletionResponse
+                        first_choice = response.choices[0]
+                        if isinstance(first_choice, dict):
+                            llm_analysis = first_choice.get("message", {}).get("content", "")
+                        else:
+                            llm_analysis = getattr(first_choice.message, "content", "") if hasattr(first_choice, "message") else ""
+                    elif isinstance(response, dict):
                         llm_analysis = response.get("content", "")
                     else:
-                        llm_analysis = getattr(response, "content", str(response))
-                    self.logger.info(f"LLM analysis completed for {ticket_id}")
+                        llm_analysis = str(response)
+                    
+                    self.logger.info(f"Extracted LLM content ({len(llm_analysis)} chars)")
+                    
+                    # Parse LLM response to extract tools to call
+                    import json
+                    import re
+                    
+                    # Log the actual LLM response for debugging
+                    self.logger.info(f"LLM raw response (first 300 chars): {llm_analysis[:300]}")
+                    
+                    parsing_method = "none"
+                    try:
+                        # Try multiple JSON extraction patterns
+                        # Pattern 1: Look for JSON in code blocks
+                        json_match = re.search(r'```(?:json)?\s*(\{[^`]+\})\s*```', llm_analysis, re.DOTALL)
+                        if json_match:
+                            parsing_method = "json_code_block"
+                        else:
+                            # Pattern 2: Look for standalone JSON object
+                            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', llm_analysis, re.DOTALL)
+                            if json_match:
+                                parsing_method = "json_inline"
+                        
+                        if json_match:
+                            json_str = json_match.group(1) if json_match.lastindex else json_match.group(0)
+                            llm_json = json.loads(json_str)
+                            tools_to_call = llm_json.get("tools_to_use", llm_json.get("tools_to_call", []))
+                            self.logger.info(f"✓ LLM recommends tools via {parsing_method}: {tools_to_call}")
+                        else:
+                            # Fallback: keyword extraction from LLM response
+                            parsing_method = "keyword_fallback"
+                            if "splunk" in llm_analysis.lower():
+                                tools_to_call.append("splunk_search")
+                            if "newrelic" in llm_analysis.lower() or "metrics" in llm_analysis.lower():
+                                tools_to_call.append("newrelic_metrics")
+                            if "price" in llm_analysis.lower() and "api" in llm_analysis.lower():
+                                tools_to_call.append("base_prices_get")
+                            self.logger.info(f"⚠ Extracted tools from LLM keywords ({parsing_method}): {tools_to_call}")
+                    except Exception as e:
+                        parsing_method = "keyword_fallback_error"
+                        self.logger.warning(f"Failed to parse LLM tool recommendations: {e}")
+                        # Fallback to keyword-based extraction
+                        if "splunk" in llm_analysis.lower():
+                            tools_to_call.append("splunk_search")
+                        if "newrelic" in llm_analysis.lower():
+                            tools_to_call.append("newrelic_metrics")
+                        self.logger.info(f"⚠ Extracted tools from LLM keywords (error fallback): {tools_to_call}")
+                    
+                    self.logger.info(f"LLM analysis completed for {ticket_id} (parsing: {parsing_method})")
                     
                 except Exception as e:
                     self.logger.warning(f"LLM analysis failed: {e}")
             
-            # Check for KB guidance if RAG is available
-            similar_incidents = []
-            if self.rag:
-                try:
-                    if hasattr(self.rag, "search"):
-                        similar_incidents = self.rag.search(combined_text, k=3)
-                except Exception as e:
-                    self.logger.warning(f"RAG search failed: {e}")
-            
-            # Call Splunk if error-related
+            # STEP 3: Execute tools recommended by LLM
             splunk_data = None
-            if self.tool_registry and any(keyword in combined_text for keyword in ["error", "failed", "timeout", "exception"]):
-                try:
-                    splunk_data = await self.tool_registry.call_tool(
-                        "splunk_search",
-                        {
-                            "query": f"index=* {ticket_id} error OR failed",
-                            "earliest_time": "-1h",
-                            "latest_time": "now"
-                        }
-                    )
-                    self.logger.info(f"Splunk search completed for {ticket_id}")
-                except Exception as e:
-                    self.logger.warning(f"Splunk search failed: {e}")
-            
-            # Call NewRelic if performance-related
             newrelic_data = None
-            if self.tool_registry and any(keyword in combined_text for keyword in ["slow", "performance", "memory", "cpu"]):
-                try:
-                    newrelic_data = await self.tool_registry.call_tool(
-                        "newrelic_metrics",
-                        {
-                            "nrql": "SELECT average(duration) FROM Transaction WHERE appName LIKE '%price%' SINCE 1 hour ago",
-                            "account_id": "default"
-                        }
-                    )
-                    self.logger.info(f"NewRelic query completed for {ticket_id}")
-                except Exception as e:
-                    self.logger.warning(f"NewRelic query failed: {e}")
+            price_data = None
+            
+            if self.tool_registry and tools_to_call:
+                # Call Splunk if LLM recommended it
+                if "splunk_search" in tools_to_call:
+                    try:
+                        splunk_data = await self.tool_registry.call_tool(
+                            "splunk_search",
+                            {
+                                "query": f"index=* {ticket_id} error OR failed",
+                                "earliest_time": "-1h",
+                                "latest_time": "now"
+                            }
+                        )
+                        self.logger.info(f"Splunk search completed for {ticket_id}")
+                    except Exception as e:
+                        self.logger.warning(f"Splunk search failed: {e}")
+                
+                # Call NewRelic if LLM recommended it
+                if "newrelic_metrics" in tools_to_call:
+                    try:
+                        newrelic_data = await self.tool_registry.call_tool(
+                            "newrelic_metrics",
+                            {
+                                "nrql": "SELECT average(duration), average(memoryUsagePercent) FROM Transaction WHERE appName LIKE '%price%' SINCE 1 hour ago",
+                                "account_id": "default"
+                            }
+                        )
+                        self.logger.info(f"NewRelic query completed for {ticket_id}")
+                    except Exception as e:
+                        self.logger.warning(f"NewRelic query failed: {e}")
+                
+                # Call Price API if LLM recommended it
+                if "base_prices_get" in tools_to_call:
+                    try:
+                        # Extract TPNB from ticket if available
+                        import re
+                        tpnb_match = re.search(r'\b\d{8}\b', combined_text)
+                        if tpnb_match:
+                            price_data = await self.tool_registry.call_tool(
+                                "base_prices_get",
+                                {
+                                    "tpnb": tpnb_match.group(0),
+                                    "locationClusterId": "default"
+                                }
+                            )
+                            self.logger.info(f"Price API query completed for {ticket_id}")
+                    except Exception as e:
+                        self.logger.warning(f"Price API query failed: {e}")
+                
+                # Call SharePoint tools if LLM recommended them
+                sharepoint_data = None
+                if any(tool.startswith("sharepoint_") for tool in tools_to_call):
+                    try:
+                        # If search_documents is recommended
+                        if "sharepoint_search_documents" in tools_to_call:
+                            sharepoint_data = await self.tool_registry.call_tool(
+                                "sharepoint_search_documents",
+                                {
+                                    "query": f"{title} {description[:100]}",
+                                    "max_results": 5
+                                }
+                            )
+                            self.logger.info(f"SharePoint search completed for {ticket_id}")
+                        
+                        # If list_files is recommended
+                        elif "sharepoint_list_files" in tools_to_call:
+                            sharepoint_data = await self.tool_registry.call_tool(
+                                "sharepoint_list_files",
+                                {
+                                    "folder_path": "Shared Documents/Runbooks",
+                                    "recursive": False
+                                }
+                            )
+                            self.logger.info(f"SharePoint list files completed for {ticket_id}")
+                    except Exception as e:
+                        self.logger.warning(f"SharePoint operation failed: {e}")
             
             # Store analysis results
             analysis = {
@@ -275,9 +429,13 @@ Respond in JSON format."""
                 "keywords": keywords,
                 "entities": entities,
                 "llm_analysis": llm_analysis,
+                "llm_tool_recommendations": tools_to_call,
                 "similar_incidents": similar_incidents,
+                "runbook_guidance_found": bool(runbook_guidance),
                 "splunk_data": splunk_data,
                 "newrelic_data": newrelic_data,
+                "price_data": price_data,
+                "sharepoint_data": sharepoint_data,
                 "text_length": len(combined_text),
                 "source": source,
                 "analyzed_at": time.time(),
@@ -288,6 +446,14 @@ Respond in JSON format."""
                 analysis["tools_used"].append("splunk_search")
             if newrelic_data:
                 analysis["tools_used"].append("newrelic_metrics")
+            if price_data:
+                analysis["tools_used"].append("base_prices_get")
+            if sharepoint_data:
+                # Identify which SharePoint tool was used
+                for tool in tools_to_call:
+                    if tool.startswith("sharepoint_"):
+                        analysis["tools_used"].append(tool)
+                        break
             
             state.add_intermediate_result({
                 "step": "analyze_incident",

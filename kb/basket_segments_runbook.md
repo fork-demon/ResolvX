@@ -1,4 +1,4 @@
-# Basket Segments File Drop Failure Runbook
+# Basket Segments File Drop Failure
 
 ## Issue Description
 Basket segments feed from LHS (file drop process) fails with timeout errors.
@@ -11,55 +11,41 @@ Basket segments feed from LHS (file drop process) fails with timeout errors.
 ## Diagnosis Steps
 
 ### 1. Check Splunk Logs
+**Tool to use**: `splunk_search`
+
 Query: `index=price-advisory-service "CreateBasketSegmentsProcessor" "file pick-up process failed"`
 
 Look for:
 - Timeout patterns
-- File location issues
-- Network connectivity to SharePoint/OneDrive
+- File path issues
+- Network connectivity problems
+- Azure Graph API failures
 
-### 2. Verify File Availability
-- Check if file was uploaded to the expected SharePoint location
-- Verify file permissions and naming conventions
-- Confirm file size and format
+### 2. Check Price Advisory API
+**Tool to use**: `base_prices_get`
 
-### 3. Check New Relic Metrics
-Query: `SELECT average(duration) FROM Transaction WHERE appName = 'price-advisory-service' FACET name SINCE 1 hour ago`
+Verify the Price Advisory API is responding:
+- Check if basket segment data can be retrieved
+- Verify API health status
+
+### 3. Check NewRelic Metrics (if performance-related)
+**Tool to use**: `newrelic_metrics`
+
+Query: `SELECT average(duration) FROM Transaction WHERE appName = 'price-advisory-service' SINCE 1 hour ago`
 
 Look for:
-- Increased latency in file operations
-- Memory issues during processing
-
-## Tools to Use
-- **splunk_search**: Search for timeout errors and patterns
-- **newrelic_metrics**: Check service performance and memory
-- **basket_segment_get**: Verify current basket segment data
+- API response times
+- Memory usage spikes
+- Thread pool exhaustion
 
 ## Resolution Steps
 
-### If Timeout is Transient:
-1. Retry the file drop process
-2. Monitor for 15 minutes
-3. If successful, mark as resolved
+1. **Immediate**: Check Azure Graph API connectivity
+2. **Short-term**: Retry the file pick-up process manually
+3. **Long-term**: Implement retry logic with exponential backoff
 
-### If File Missing or Corrupted:
-1. Contact data team to re-upload file
-2. Verify file format matches schema
-3. Trigger manual reprocessing
+## Severity
+**High** - Impacts pricing data pipeline
 
-### If Service Performance Issue:
-1. Check memory usage via New Relic
-2. Scale up service if needed
-3. Clear cache and restart pods
-
-## Escalation Criteria
-- File missing for > 2 hours
-- Timeout persists after 3 retries
-- Memory usage > 90%
-- Business impact: Basket segments not updated for pricing decisions
-
-## Expected Resolution Time
-- Normal: 15-30 minutes (retry)
-- Complex: 1-2 hours (file reupload + validation)
-- Critical: Immediate escalation if pricing decisions blocked
-
+## Escalation
+If issue persists > 2 hours, escalate to Engineering Team

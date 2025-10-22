@@ -1,27 +1,23 @@
 """
-Tool system for the Golden Agent Framework.
+Core tools module for direct tool implementations.
 
-Provides centralized tool management with MCP gateway integration,
-local tool fallbacks, and unified tool execution interface.
+Tools in this module are registered directly in the ToolRegistry
+without going through MCP gateway.
 """
 
-from core.tools.base import BaseTool, ToolProxy
-from core.tools.central_gateway import CentralGatewayClient
-from core.tools.std_tools import (
-    SplunkTool,
-    ZendeskTool, 
-    NewRelicTool,
-    VaultTool,
-    MetricsTool
+from core.tools.sharepoint_tool import (
+    SharePointListFilesTool,
+    SharePointDownloadFileTool,
+    SharePointUploadFileTool,
+    SharePointSearchTool,
+    create_sharepoint_tools
 )
 
 __all__ = [
-    "BaseTool",
-    "ToolProxy",
-    "CentralGatewayClient",
-    "SplunkTool",
-    "ZendeskTool",
-    "NewRelicTool", 
-    "VaultTool",
-    "MetricsTool",
+    "SharePointListFilesTool",
+    "SharePointDownloadFileTool",
+    "SharePointUploadFileTool",
+    "SharePointSearchTool",
+    "create_sharepoint_tools",
 ]
+

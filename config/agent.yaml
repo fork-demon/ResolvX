@@ -303,35 +303,17 @@ agents:
           ORG_NAME: "{ORG_NAME}"
           ENVIRONMENT: "{ENVIRONMENT}"
 
-  # Splunk Agent - queries logs/metrics
-  splunk:
-    enabled: true
-    type: "splunk"
-    description: "Executes Splunk queries based on ticket context"
-    team: "operations"
-    knowledge_dir: "knowledge/splunk"
-    prompts:
-      system_prompt:
-        type: "file"
-        path: "prompts/splunk/system_prompt.md"
-        variables:
-          ORG_NAME: "{ORG_NAME}"
-          ENVIRONMENT: "{ENVIRONMENT}"
-
-  # New Relic Agent - queries metrics
-  newrelic:
-    enabled: true
-    type: "newrelic"
-    description: "Retrieves New Relic metrics based on ticket context"
-    team: "operations"
-    knowledge_dir: "knowledge/newrelic"
-    prompts:
-      system_prompt:
-        type: "file"
-        path: "prompts/newrelic/system_prompt.md"
-        variables:
-          ORG_NAME: "{ORG_NAME}"
-          ENVIRONMENT: "{ENVIRONMENT}"
+  # Note: Splunk and NewRelic are TOOLS (via MCP gateway), not agents
+  # They are called by the Triage agent as needed based on LLM recommendations
+  # See tools: mcp_tool_splunk_search and mcp_tool_newrelic_metrics
+  
+  # splunk:
+  #   enabled: false  # Now a TOOL (mcp_tool_splunk_search), not an agent
+  #   description: "Use splunk_search tool via Triage agent's LLM-driven selection"
+  
+  # newrelic:
+  #   enabled: false  # Now a TOOL (mcp_tool_newrelic_metrics), not an agent
+  #   description: "Use newrelic_metrics tool via Triage agent's LLM-driven selection"
 
   # metrics removed in minimal repo
 

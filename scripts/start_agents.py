@@ -160,29 +160,8 @@ class AgentManager:
 
         return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
 
-        # Splunk agent
-        if agent_name == "splunk" and agent_config.enabled:
-            from agents.splunk.agent import SplunkAgent
-            agent = SplunkAgent({
-                "endpoint": getattr(agent_config, "endpoint", None),
-                "username": getattr(agent_config, "username", None),
-                "password": getattr(agent_config, "password", None),
-                "knowledge_dir": getattr(agent_config, "knowledge_dir", "knowledge/splunk"),
-            })
-            self.agents[agent_name] = agent
-            return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
-
-        # New Relic agent
-        if agent_name == "newrelic" and agent_config.enabled:
-            from agents.newrelic.agent import NewRelicAgent
-            agent = NewRelicAgent({
-                "api_key": getattr(agent_config, "api_key", None),
-                "account_id": getattr(agent_config, "account_id", None),
-                "region": getattr(agent_config, "region", "US"),
-                "knowledge_dir": getattr(agent_config, "knowledge_dir", "knowledge/newrelic"),
-            })
-            self.agents[agent_name] = agent
-            return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
+        # Note: Splunk and NewRelic are now TOOLS (via MCP gateway), not separate agents
+        # They are called by the Triage agent as needed, based on LLM recommendations
 
     async def _schedule_poller(self, agent, cron_expr: str):
         """Schedule the poller agent using a simple cron-like scheduler (APScheduler if available)."""
