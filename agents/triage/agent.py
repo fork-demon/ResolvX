@@ -18,6 +18,7 @@ from core.gateway.tool_registry import ToolRegistry
 from core.observability import get_logger, get_tracer, get_metrics_client
 from core.memory.base import BaseMemory
 from core.rag.local_kb import LocalKB
+from core.evaluation import Guardrails, HallucinationChecker, QualityAssessor
 
 
 class TriageAgent(BaseAgent):
@@ -66,6 +67,11 @@ class TriageAgent(BaseAgent):
             pass
         self.tracer = get_tracer("agent.triage")
         self.metrics = get_metrics_client()
+        
+        # Initialize evaluation components
+        self.guardrails = Guardrails(getattr(config, "guardrails", {}) if hasattr(config, "guardrails") else {})
+        self.hallucination_checker = HallucinationChecker(getattr(config, "hallucination", {}) if hasattr(config, "hallucination") else {})
+        self.quality_assessor = QualityAssessor(getattr(config, "quality", {}) if hasattr(config, "quality") else {})
 
         # Triage-specific configuration
         self.severity_keywords = {
@@ -338,6 +344,101 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                         self.logger.info(f"⚠ Extracted tools from LLM keywords (error fallback): {tools_to_call}")
                     
                     self.logger.info(f"LLM analysis completed for {ticket_id} (parsing: {parsing_method})")
+                    
+                    # EVALUATION: Apply guardrails and quality checks to LLM analysis
+                    if llm_analysis:
+                        try:
+                            # Create evaluation spans for proper tracing
+                            with self.tracer.start_as_current_span("guardrails_evaluation") as guardrail_span:
+                                guardrail_span.set_input({
+                                    "content": llm_analysis,
+                                    "content_type": "json",
+                                    "ticket_id": ticket_id,
+                                    "source": source
+                                })
+                                
+                                # Check content against guardrails
+                                guardrail_result = await self.guardrails.check_content(
+                                    content=llm_analysis,
+                                    content_type="json",
+                                    context={"ticket_id": ticket_id, "source": source}
+                                )
+                                
+                                guardrail_span.set_output(guardrail_result.dict())
+                                guardrail_span.set_attribute("evaluation_type", "guardrails")
+                                guardrail_span.set_attribute("passed", guardrail_result.passed)
+                                guardrail_span.set_attribute("violations", guardrail_result.violations)
+                                
+                                if not guardrail_result.passed:
+                                    self.logger.warning(f"Guardrail violation in LLM analysis: {guardrail_result.message}")
+                                    # Log violations for monitoring
+                                    self.metrics.create_counter(
+                                        "guardrail_violations_total",
+                                        "Total guardrail violations"
+                                    ).inc(1)
+                            
+                            # Check for hallucinations
+                            with self.tracer.start_as_current_span("hallucination_evaluation") as hallucination_span:
+                                hallucination_span.set_input({
+                                    "response": llm_analysis,
+                                    "context": {"ticket": ticket, "runbook_guidance": runbook_guidance},
+                                    "sources": similar_incidents if similar_incidents else None
+                                })
+                                
+                                hallucination_result = await self.hallucination_checker.check_response(
+                                    response=llm_analysis,
+                                    context={"ticket": ticket, "runbook_guidance": runbook_guidance},
+                                    sources=similar_incidents if similar_incidents else None
+                                )
+                                
+                                hallucination_span.set_output(hallucination_result.dict())
+                                hallucination_span.set_attribute("evaluation_type", "hallucination")
+                                hallucination_span.set_attribute("has_hallucination", hallucination_result.has_hallucination)
+                                hallucination_span.set_attribute("hallucination_types", hallucination_result.hallucination_types)
+                                
+                                if hallucination_result.has_hallucination:
+                                    self.logger.warning(f"Hallucination detected in LLM analysis: {hallucination_result.hallucination_types}")
+                                    # Log hallucinations for monitoring
+                                    self.metrics.create_counter(
+                                        "hallucination_detections_total",
+                                        "Total hallucination detections"
+                                    ).inc(1)
+                            
+                            # Assess quality
+                            with self.tracer.start_as_current_span("quality_evaluation") as quality_span:
+                                quality_span.set_input({
+                                    "response": llm_analysis,
+                                    "context": {"ticket": ticket, "tools_recommended": tools_to_call},
+                                    "expected_format": "json"
+                                })
+                                
+                                quality_result = await self.quality_assessor.assess_response(
+                                    response=llm_analysis,
+                                    context={"ticket": ticket, "tools_recommended": tools_to_call},
+                                    expected_format="json"
+                                )
+                                
+                                quality_span.set_output(quality_result.dict())
+                                quality_span.set_attribute("evaluation_type", "quality")
+                                quality_span.set_attribute("overall_score", quality_result.overall_score)
+                                quality_span.set_attribute("strengths", quality_result.strengths)
+                                quality_span.set_attribute("weaknesses", quality_result.weaknesses)
+                            
+                            # Store evaluation results in state
+                            state.evaluation_results = {
+                                "guardrails": guardrail_result.dict(),
+                                "hallucination": hallucination_result.dict(),
+                                "quality": quality_result.dict()
+                            }
+                            
+                            self.logger.info(f"Evaluation completed for {ticket_id}: "
+                                            f"guardrails={guardrail_result.passed}, "
+                                            f"hallucination={not hallucination_result.has_hallucination}, "
+                                            f"quality={quality_result.overall_score}")
+                            
+                        except Exception as e:
+                            self.logger.error(f"Evaluation failed for {ticket_id}: {e}")
+                            # Continue with analysis even if evaluation fails
                     
                 except Exception as e:
                     self.logger.warning(f"LLM analysis failed: {e}")

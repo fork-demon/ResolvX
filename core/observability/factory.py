@@ -15,10 +15,8 @@ from core.observability.metrics import configure_metrics, get_metrics_client
 from core.observability.logger import LoggerMixin
 from core.observability.tracer import TracerMixin
 from core.observability.metrics import MetricsMixin
-from core.observability.central_forwarder import CentralForwarder, ForwarderConfig
 from core.observability.langsmith_tracer import LangSmithTracer, LangSmithConfig
 from core.observability.langfuse_tracer import LangFuseTracer, LangFuseConfig
-from core.observability.console_tracer import ConsoleTracer, ConsoleConfig
 
 
 class ObservabilityFactory:
@@ -86,30 +84,7 @@ class ObservabilityFactory:
             "metrics": get_metrics_client(),
         }
 
-    def create_central_forwarder(self, config: Optional[Config] = None) -> CentralForwarder:
-        """
-        Create a central observability forwarder.
-
-        Args:
-            config: Framework configuration
-
-        Returns:
-            Central forwarder instance
-        """
-        if config and config.observability:
-            forwarder_config = ForwarderConfig(
-                enabled=config.observability.enabled,
-                backends=config.observability.backends or ["console"],
-                batch_size=config.observability.batch_size or 100,
-                flush_interval=config.observability.flush_interval or 30.0,
-                timeout=config.observability.timeout or 30.0,
-                retry_attempts=config.observability.retry_attempts or 3,
-                retry_delay=config.observability.retry_delay or 1.0,
-            )
-        else:
-            forwarder_config = ForwarderConfig()
-
-        return CentralForwarder(forwarder_config)
+    # Central forwarder removed - using direct tracer configuration
 
     def create_langsmith_tracer(self, config: Optional[Config] = None) -> LangSmithTracer:
         """
@@ -164,29 +139,7 @@ class ObservabilityFactory:
 
         return LangFuseTracer(langfuse_config)
 
-    def create_console_tracer(self, config: Optional[Config] = None) -> ConsoleTracer:
-        """
-        Create a console tracer.
-
-        Args:
-            config: Framework configuration
-
-        Returns:
-            Console tracer instance
-        """
-        if config and config.observability and config.observability.console:
-            console_config = ConsoleConfig(
-                enabled=config.observability.console.get("enabled", True),
-                log_level=config.observability.console.get("level", "INFO"),
-                include_timestamps=config.observability.console.get("include_timestamps", True),
-                include_metadata=config.observability.console.get("include_metadata", True),
-                format=config.observability.console.get("format", "structured"),
-                colorize=config.observability.console.get("colorize", True),
-            )
-        else:
-            console_config = ConsoleConfig()
-
-        return ConsoleTracer(console_config)
+    # Console tracer removed - using LangFuse for production
 
 
 class ObservabilityMixin(LoggerMixin, TracerMixin, MetricsMixin):
@@ -259,37 +212,7 @@ def configure_observability(config: Optional[Config] = None) -> None:
 
 # Convenience functions for quick setup
 
-def setup_console_observability(
-    log_level: str = "INFO",
-    metrics_port: int = 8080,
-    tracing_enabled: bool = True
-) -> Dict[str, Any]:
-    """
-    Quick setup for console-based observability.
-
-    Args:
-        log_level: Logging level
-        metrics_port: Port for metrics server
-        tracing_enabled: Whether to enable tracing
-
-    Returns:
-        Dictionary containing observability components
-    """
-    from core.config import ObservabilityConfig
-
-    observability_config = ObservabilityConfig(
-        backend="console",
-        console={
-            "level": log_level,
-            "format": "structured",
-            "include_timestamps": True,
-            "port": metrics_port,
-            "enabled": tracing_enabled,
-        }
-    )
-
-    config = Config(observability=observability_config)
-    return create_observability(config)
+# Console observability setup removed - using LangFuse for production
 
 
 def setup_production_observability(

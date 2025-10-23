@@ -10,9 +10,12 @@ This repository implements a minimal, prompt-driven, tool-centric support agent 
 - Agents
   - Poller: polls Zendesk and forwards tickets.
   - Triage: analyzes tickets, chooses tools, enriches context, forwards.
-  - Splunk/New Relic: select and run query templates; return structured results.
-  - Memory: deduplicates tickets, returns related context, stores new items.
+    - **Evaluation**: Integrated guardrails, hallucination detection, quality assessment
+  - Memory: deduplicates tickets using FAISS vector search, returns related context, stores new items.
   - Supervisor: final decision-maker; can query Global RAG.
+- Tools (not Agents)
+  - Splunk/New Relic: MCP tools called by Triage agent via LLM-driven selection.
+  - Product/Location APIs: MCP tools for business entity lookups.
 - Tooling Layer (Gateway)
   - Central MCP tools (production) or Local Python tools (development).
   - Declared in `config/agent.yaml` under `gateway.tools`.

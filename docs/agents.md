@@ -14,24 +14,20 @@ Each agent is prompt-driven and single-purpose. Agents rely on the ToolRegistry 
 - Output: Enriched payload to Supervisor; no final decisions.
 - Prompt: `prompts/triage/system_prompt.md` (uses glossary and mapping to tools).
 - Resources: `resources/triage/incident_types.yaml`, `resources/triage/glossary.yaml`.
+- **Evaluation**: Integrated guardrails, hallucination detection, and quality assessment.
 
 ### Memory
 - Purpose: De-duplicate and contextualize with historical tickets.
 - Behavior: If duplicate resolved → return resolution; in-progress → merge; closed-unresolved → escalate; else store.
-- Backend: In-memory vector DB with daily reset.
+- Backend: FAISS vector search with SentenceTransformer embeddings.
+- Config: `memory.faiss` (auto-detects embedding dimensions, persistent storage).
 - Prompt: `prompts/memory/system_prompt.md`.
 
-### Splunk
-- Purpose: Select SPL template (from knowledge_dir or vector store) and optionally execute.
-- Output: Structured results for Triage/Supervisor.
-- Prompt: `prompts/splunk/system_prompt.md`.
-- Knowledge: `knowledge/splunk` directory for templates/snippets.
-
-### New Relic
-- Purpose: Select NRQL template (from knowledge_dir or vector store) and optionally execute.
-- Output: Structured results for Triage/Supervisor.
-- Prompt: `prompts/newrelic/system_prompt.md`.
-- Knowledge: `knowledge/newrelic` directory for templates/snippets.
+### Splunk & New Relic (Tools, not Agents)
+- Purpose: Now implemented as MCP tools, not standalone agents.
+- Usage: Called by Triage agent via LLM-driven tool selection.
+- Tools: `splunk_search`, `newrelic_metrics` via `gateway.tools`.
+- Integration: Triage agent uses RAG + glossary to select appropriate tools.
 
 ### Supervisor
 - Purpose: Final decision-maker (comment/assign/escalate; human-in-the-loop).

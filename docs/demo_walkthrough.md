@@ -6,7 +6,7 @@ This walkthrough shows an end-to-end flow using local mocks and optional tracing
 ```bash
 curl -Ls https://astral.sh/uv/install.sh | sh
 uv venv && source .venv/bin/activate
-uv pip install -e .
+uv install
 
 export ORG_NAME="DemoOrg"
 export ENVIRONMENT="local"
@@ -21,7 +21,7 @@ export LANGFUSE_SECRET_KEY="..."
 ```
 
 ### 2) Configure Tools to Use Local Mocks
-Update your environment override (e.g., `config/environments/local.yaml`) to map canonical tool names to local mocks:
+Update your main config file (`config/agent.yaml`) to map canonical tool names to local mocks:
 ```yaml
 gateway:
   tools:

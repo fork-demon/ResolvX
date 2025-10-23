@@ -126,6 +126,34 @@ agents:
     description: "Intelligently routes and prioritizes tasks"
     team: "operations"
 
+    # Evaluation configuration - Guardrails, hallucination detection, quality assessment
+    guardrails:
+      enable_pii_detection: true
+      enable_safety_checks: true
+      enable_policy_enforcement: true
+      require_human_approval: false
+      pii_patterns:
+        - "email"
+        - "phone"
+        - "ssn"
+        - "credit_card"
+      safety_patterns:
+        - "malicious"
+        - "harmful"
+        - "inappropriate"
+    
+    hallucination:
+      enable_fact_checking: true
+      enable_consistency_checks: true
+      knowledge_base_threshold: 0.8
+      cross_reference_sources: true
+    
+    quality:
+      enable_quality_assessment: true
+      expected_quality: "high"
+      performance_tracking: true
+      user_feedback_integration: true
+
     # Prompt configuration - Core to agent behavior
     prompts:
       system_prompt:

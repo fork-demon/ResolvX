@@ -22,7 +22,7 @@ from core.observability import get_logger, get_tracer, get_metrics_client
 from core.gateway.tool_registry import ToolRegistry
 # Optional RAG base; keep typing loose to avoid hard import
 from typing import Any as BaseRAG
-from extensions.mcp_servers.zendesk_tools import ZendeskConfig, ZendeskMCPServer
+# Removed extensions import - using centralized MCP gateway
 
 
 class ZendeskAuth(BaseModel):
@@ -129,7 +129,7 @@ class ZendeskPollerAgent(BaseAgent):
         self.team_name: str = config.get("team", "operations")
         self.zendesk_auth: Optional[ZendeskAuth] = None
         self.zendesk_configs: Dict[str, ZendeskQueueConfig] = {}
-        self.zendesk_mcp_server = None
+        # Using centralized MCP gateway instead of local server
         self.poll_tasks: Dict[str, asyncio.Task] = {}
 
         # Polling configuration
@@ -139,7 +139,7 @@ class ZendeskPollerAgent(BaseAgent):
         self.auto_assign_enabled = config.get("auto_assign_enabled", False)
         
         # Initialize Zendesk MCP server
-        self._initialize_zendesk_server()
+        # MCP server initialization removed - using centralized gateway
         # Load optional zendesk config from agent config
         self._load_zendesk_from_config(config)
 
@@ -167,35 +167,13 @@ class ZendeskPollerAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Failed to load Zendesk config from agent config: {e}")
 
-    def _initialize_zendesk_server(self):
-        """Initialize the Zendesk MCP server."""
-        try:
-            self.zendesk_mcp_server = ZendeskMCPServer(port=8088)
-            self.logger.info("Zendesk MCP server initialized")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Zendesk MCP server: {e}")
+    # MCP server initialization removed - using centralized gateway
 
     def add_queue_config(self, config: ZendeskQueueConfig):
         """Add a Zendesk queue configuration (keyed by queue name)."""
         self.zendesk_configs[config.queue_name] = config
 
-        # Register team-level auth once with MCP server
-        if self.zendesk_mcp_server and self.zendesk_auth:
-            # Only register if not already
-            team_key = self.team_name
-            if team_key not in self.zendesk_mcp_server.zendesk_tools.configs:
-                zendesk_config = ZendeskConfig(
-                    team_id=team_key,
-                    email=self.zendesk_auth.email,
-                    api_token=self.zendesk_auth.api_token,
-                    username=self.zendesk_auth.username,
-                    password=self.zendesk_auth.password,
-                    base_url=self.zendesk_auth.base_url,
-                    subdomain=self.zendesk_auth.subdomain,
-                    poll_interval=config.poll_interval,
-                    max_tickets_per_poll=config.max_tickets_per_poll,
-                )
-                self.zendesk_mcp_server.register_team_config(team_key, zendesk_config)
+        # MCP server registration removed - using centralized gateway
 
         self.logger.info(f"Added Zendesk queue config: {config.queue_name} (team: {self.team_name})")
 
@@ -676,9 +654,7 @@ class ZendeskPollerAgent(BaseAgent):
         try:
             self.logger.info("Starting Zendesk queue polling")
             
-            # Start MCP server
-            if self.zendesk_mcp_server:
-                await self.zendesk_mcp_server.start()
+            # MCP server startup removed - using centralized gateway
             
             # Start polling tasks for each configured queue
             for queue_name, config in self.zendesk_configs.items():

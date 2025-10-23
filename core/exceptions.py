@@ -49,3 +49,21 @@ class RAGError(AgentFrameworkError):
     """Raised when there's an error with RAG operations."""
 
     pass
+
+
+class GuardrailError(AgentFrameworkError):
+    """Raised when there's a guardrail violation."""
+
+    pass
+
+
+class HallucinationError(AgentFrameworkError):
+    """Raised when hallucination is detected."""
+
+    pass
+
+
+class QualityError(AgentFrameworkError):
+    """Raised when there's a quality assessment error."""
+
+    pass
