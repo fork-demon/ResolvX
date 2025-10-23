@@ -1,0 +1,18 @@
+{
+  "id": "ALERT-001",
+  "subject": "Basket segments - File drop process failed",
+  "status": "new",
+  "priority": "P3",
+  "environment": "PPE",
+  "source": "Splunk",
+  "impacted_service": "price-advisory-service:ppe:Basket segments - File drop process failed",
+  "impacted_configuration_item": "price-advisory-85559999bf-dltm8",
+  "description": "Basket segments feed LHS process failed, log: price-advisory-service:ppe:price-advisory-85559999bf-dltm8 [TraceId_CreateBasketSegmentsRequest_2025-10-21T04:41:35,68f70effe2b067cd3a743481c76f7df4,68f70eff7788762b52d0640c61cd8aab,52d0640c61cd8aab] 21 --- [OkHttp https://graph.microsoft.com/...] .a.p.a.d.p.CreateBasketSegmentsProcessor : step='create-basket-segment-processor', MSG='file pick-up process failed', traceId='TraceId_CreateBasketSegmentsRequest_2025-10-21T04:41:35', error='java.io.InterruptedIOException: timeout'",
+  "first_received_at": "2025-10-21T04:56:14Z",
+  "ended_at": "2025-10-21T06:01:07Z",
+  "zendesk_group": "289_PolicyLifeCycleServices",
+  "kb_link": "Link",
+  "tags": ["basket-segments", "file-drop", "timeout", "ppe", "splunk"]
+}
+
+

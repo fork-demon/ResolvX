@@ -1,0 +1,17 @@
+{
+  "id": "ALERT-002",
+  "subject": "Competitor promotional price - File drop process failed",
+  "status": "new",
+  "priority": "P3",
+  "environment": "PPE",
+  "source": "Splunk",
+  "impacted_service": "price-advisory-service:ppe:Competitor promotional price - File drop process failed",
+  "impacted_configuration_item": "price-advisory-85559999bf-dltm8",
+  "description": "Competitor promotional price feed LHS process failed, log: price-advisory-service:ppe:price-advisory-85559999bf-dltm8 [TraceId_CreateCompetitorPromotionalPriceRequest_2025-10-21T04:32:15,68f70ccfa2424ba6c52270a38118a530,68f70ccf06c3680471d7f6aa988815dc,71d7f6aa988815dc] 21 --- [OkHttp https://graph.microsoft.com/...] reateCompetitorPromotionalPriceProcessor : step='create-competitor-promotional-price-processor', MSG='file pick-up process failed', traceId='TraceId_CreateCompetitorPromotionalPriceRequest_2025-10-21T04:32:15', error='java.io.InterruptedIOException: timeout'",
+  "first_received_at": "2025-10-21T04:46:13Z",
+  "zendesk_group": "289_PolicyLifeCycleServices",
+  "kb_link": "Link",
+  "tags": ["competitor-promo", "file-drop", "timeout", "ppe", "splunk"]
+}
+
+

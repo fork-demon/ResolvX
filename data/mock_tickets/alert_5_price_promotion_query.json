@@ -1,0 +1,12 @@
+{
+  "id": "ALERT-005",
+  "subject": "Price and promotions: Scanning at the wrong price",
+  "status": "new",
+  "priority": "P3",
+  "environment": "prod",
+  "source": "Zendesk",
+  "description": "What is the price or promotion query? Price and promotions::Scanning at the wrong price. Selling Price in Ticket: 0.00, Actual Selling price: 1.80",
+  "tags": ["pricing", "promotions", "discrepancy", "prod"]
+}
+
+

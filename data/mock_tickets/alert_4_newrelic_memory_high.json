@@ -1,0 +1,18 @@
+{
+  "id": "ALERT-004",
+  "subject": "[PRICE][PROD] Price-Cmd-Api Memory Usage % is too high | C-P3 | W-P4",
+  "status": "new",
+  "priority": "P4",
+  "environment": "prod",
+  "source": "NewRelic",
+  "impacted_service": "price-cmd-api",
+  "description": "NewRelic has detected a problem with price-cmd-api, memory usage > 85% for 5 minutes.",
+  "details": {
+    "clusterName": "api-prod-euw-v3",
+    "podName": "price-cmd-api-644f57d789-s27ps",
+    "containerImage": "pandpprodeuwacr.azurecr.io/price/price-cmd-api:0.60.0-CR"
+  },
+  "tags": ["newrelic", "memory", "prod", "price-cmd-api"]
+}
+
+

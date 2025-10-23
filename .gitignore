@@ -129,7 +129,6 @@ dmypy.json
 .pyre/
 
 # Project specific
-data/
 logs/
 *.db
 *.sqlite3

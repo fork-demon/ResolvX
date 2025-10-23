@@ -1,0 +1,12 @@
+{
+  "id": "ALERT-003",
+  "subject": "Investigate unexpected price move to 6.70 in Large Stores England",
+  "status": "new",
+  "priority": "P3",
+  "environment": "prod",
+  "source": "Zendesk",
+  "description": "Hello, we've seen a strange price move to 6.70 that went live on 18/10 in Large Stores England only that we don't know how it's happened that we need to check as we don't think this price move has been loaded by our team. Please can you investigate and tell me the user of who loaded this price move and any further detail you have?",
+  "tags": ["pricing", "investigation", "audit", "large-stores-england"]
+}
+
+
