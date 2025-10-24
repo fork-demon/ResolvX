@@ -174,20 +174,20 @@ class TriageAgent(BaseAgent):
                 return state
             
             ticket = tickets[0]  # Process first ticket
-            
+
             # Extract basic information
             title = ticket.get("subject", "")
             description = ticket.get("description", "")
             source = ticket.get("source", "unknown")
             ticket_id = ticket.get("id", "unknown")
-            
+
             # Perform text analysis
             combined_text = f"{title} {description}".lower()
-            
+
             # Extract keywords and entities
             keywords = self._extract_keywords(combined_text)
             entities = self._extract_entities(combined_text)
-            
+
             # STEP 1: Check KB/RAG for runbook guidance FIRST
             similar_incidents = []
             runbook_guidance = ""
@@ -523,7 +523,7 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                             self.logger.info(f"SharePoint list files completed for {ticket_id}")
                     except Exception as e:
                         self.logger.warning(f"SharePoint operation failed: {e}")
-            
+
             # Store analysis results
             analysis = {
                 "ticket_id": ticket_id,
@@ -560,14 +560,14 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                 "step": "analyze_incident",
                 "analysis": analysis,
             })
-            
+
             # Update state
             state.metadata["analysis"] = analysis
             state.increment_step()
-            
+
             self.logger.info(f"Analyzed incident {ticket_id}: {len(keywords)} keywords, {len(entities)} entities, {len(analysis['tools_used'])} tools used")
             return state
-            
+
         except Exception as e:
             state.add_error(f"Incident analysis failed: {e}", "analysis_error")
             raise

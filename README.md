@@ -21,7 +21,7 @@ Prompt-driven, central-gateway-aware agents for support workflows. Minimal, clea
 ## Quick Start (Local)
 
 1) Install (uv)
-```bash
+   ```bash
 # install uv if needed
 curl -Ls https://astral.sh/uv/install.sh | sh
 
@@ -34,12 +34,12 @@ uv pip install -e .
 ```
 
 Alternative (pip):
-```bash
+   ```bash
 pip install -r requirements.txt
-```
+   ```
 
 2) Set env (example)
-```bash
+   ```bash
 export ORG_NAME="YourOrganization"
 export ENVIRONMENT="local"
 export CENTRAL_MCP_GATEWAY_URL="http://localhost:8081"
@@ -50,7 +50,7 @@ export LANGSMITH_API_KEY="..."   # if using LangSmith
 ```
 
 3) Start agents
-```bash
+   ```bash
 python scripts/start_agents.py
 ```
 
@@ -134,8 +134,8 @@ Drop articles in `kb/`; they’ll be indexed for semantic search (with keyword f
 
 ### Domain Glossary
 Provide business entities and patterns used by Triage.
-```yaml
-agents:
+   ```yaml
+   agents:
   triage:
     resources:
       knowledge_base:

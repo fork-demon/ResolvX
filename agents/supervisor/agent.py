@@ -142,7 +142,7 @@ class SupervisorAgent(BaseAgent):
             super().__init__("supervisor", agent_config, **kwargs)
         else:
             full_config = config
-            super().__init__(config, memory, rag, **kwargs)
+        super().__init__(config, memory, rag, **kwargs)
 
         self.logger = get_logger("agents.supervisor")
         self.tracer = get_tracer("agents.supervisor")

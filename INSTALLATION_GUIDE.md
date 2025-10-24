@@ -292,7 +292,16 @@ python scripts/test_full_workflow.py
 
 ### **Common Issues**
 
-#### **1. Python Version Issues**
+#### **1. LangGraph Import Issues**
+```bash
+# Fix LangGraph import compatibility
+python fix_langgraph_imports.py
+
+# Or manually update LangGraph
+pip install --upgrade langgraph==0.2.16 langchain==0.2.16
+```
+
+#### **2. Python Version Issues**
 ```bash
 # Check Python version
 python --version
