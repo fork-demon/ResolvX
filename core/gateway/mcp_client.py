@@ -374,9 +374,14 @@ class MCPClient:
 
     def _get_gateway_url(self) -> str:
         """Get MCP gateway URL from configuration."""
+        # First try the environment variable
+        if self.config and hasattr(self.config, 'central_mcp_gateway_url'):
+            return self.config.central_mcp_gateway_url
+        
+        # Fallback to gateway config
         if self.config and self.config.gateway.mcp_gateway:
-            return self.config.gateway.mcp_gateway.get("url", "http://localhost:8001")
-        return "http://localhost:8001"
+            return self.config.gateway.mcp_gateway.get("url", "http://localhost:8081")
+        return "http://localhost:8081"
 
     def _get_timeout(self) -> int:
         """Get timeout from configuration."""

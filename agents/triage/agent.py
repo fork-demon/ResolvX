@@ -444,9 +444,11 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                     self.logger.warning(f"LLM analysis failed: {e}")
             
             # STEP 3: Execute tools recommended by LLM
+            # Initialize tool data variables
             splunk_data = None
             newrelic_data = None
             price_data = None
+            sharepoint_data = None
             
             if self.tool_registry and tools_to_call:
                 # Call Splunk if LLM recommended it
@@ -497,7 +499,6 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                         self.logger.warning(f"Price API query failed: {e}")
                 
                 # Call SharePoint tools if LLM recommended them
-                sharepoint_data = None
                 if any(tool.startswith("sharepoint_") for tool in tools_to_call):
                     try:
                         # If search_documents is recommended
