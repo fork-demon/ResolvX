@@ -19,6 +19,7 @@ from core.observability import get_logger, get_tracer, get_metrics_client
 from core.memory.base import BaseMemory
 from core.rag.local_kb import LocalKB
 from core.evaluation import Guardrails, HallucinationChecker, QualityAssessor
+from core.domain import load_domain_knowledge, DomainKnowledge
 
 
 class TriageAgent(BaseAgent):
@@ -55,7 +56,14 @@ class TriageAgent(BaseAgent):
         self.tool_registry = tool_registry
         self.memory = memory
         self.rag = rag
-        # Auto-load LocalKB if configured externally passed as None
+        
+        # Load domain knowledge (glossary, incident types) at initialization
+        self.domain_knowledge: DomainKnowledge = load_domain_knowledge()
+        self.logger.info(f"Loaded domain knowledge: {len(self.domain_knowledge.entities)} entities, "
+                        f"{len(self.domain_knowledge.incident_types)} incident types, "
+                        f"{len(self.domain_knowledge.location_clusters)} location clusters")
+        
+        # Auto-load LocalKB for runbooks if not provided
         try:
             if self.rag is None:
                 from core.config import Config
@@ -238,8 +246,12 @@ class TriageAgent(BaseAgent):
                     llm_client = LLMGatewayClient(config.gateway)
                     await llm_client.initialize()
                     
-                    # Build analysis prompt with runbook context
-                    system_prompt = """You are an intelligent triage agent analyzing support tickets.
+                    # Use loaded prompt or fallback to default
+                    if self.has_prompt("system_prompt"):
+                        system_prompt = self.get_prompt("system_prompt")
+                    else:
+                        # Fallback if prompt not loaded
+                        system_prompt = """You are an intelligent triage agent analyzing support tickets.
 Based on the ticket details and runbook guidance, recommend which diagnostic tools to use.
 
 Available tools:
@@ -253,15 +265,38 @@ Available tools:
 - sharepoint_upload_file: Upload files to SharePoint (e.g., analysis reports)
 - sharepoint_search_documents: Search SharePoint for related documentation
 
-Your response must be valid JSON with this format:
+CRITICAL: Your response MUST be ONLY valid JSON in a code block. Do not include explanations outside the JSON.
+
+Format:
+```json
 {
   "severity": "critical|high|medium|low",
   "category": "infrastructure|application|security|support",
   "tools_to_use": ["tool_name1", "tool_name2"],
   "reasoning": "Brief explanation of why these tools"
-}"""
+}
+```
+
+Always recommend at least 1-2 diagnostic tools based on the incident type."""
                     
-                    user_prompt = f"""Ticket ID: {ticket_id}
+                    # Build user prompt with incident analysis template if available
+                    if self.has_prompt("incident_analysis"):
+                        user_prompt = self.get_prompt(
+                            "incident_analysis",
+                            INCIDENT_ID=ticket_id,
+                            REPORTED_TIME=str(ticket.get("created_at", "")),
+                            REPORTER=ticket.get("requester_id", "unknown"),
+                            INCIDENT_DESCRIPTION=description[:500],
+                            AFFECTED_SYSTEMS=source,
+                            USER_IMPACT="Unknown",
+                            HISTORICAL_INCIDENTS=runbook_guidance if runbook_guidance else "No historical data",
+                            CURRENT_SYSTEM_STATUS="Unknown",
+                            RECENT_CHANGES="Unknown",
+                            ACTIVE_ALERTS="None"
+                        )
+                    else:
+                        # Fallback user prompt
+                        user_prompt = f"""Ticket ID: {ticket_id}
 Subject: {title}
 Description: {description[:500]}
 Source: {source}
@@ -278,8 +313,8 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                     response = await llm_client.chat_completion(
                         messages=messages,
                         model="llama3.2",
-                        temperature=0.1,
-                        max_tokens=500
+                        temperature=0.3,
+                        max_tokens=1500
                     )
                     
                     # Extract content from response (ChatCompletionResponse object)
@@ -443,89 +478,34 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                 except Exception as e:
                     self.logger.warning(f"LLM analysis failed: {e}")
             
-            # STEP 3: Execute tools recommended by LLM
-            # Initialize tool data variables
-            splunk_data = None
-            newrelic_data = None
-            price_data = None
-            sharepoint_data = None
+            # STEP 3: Execute tools recommended by LLM (DYNAMIC - works with any tool!)
+            tool_results = {}
             
             if self.tool_registry and tools_to_call:
-                # Call Splunk if LLM recommended it
-                if "splunk_search" in tools_to_call:
+                self.logger.info(f"Executing {len(tools_to_call)} tools recommended by LLM: {tools_to_call}")
+                
+                for tool_name in tools_to_call:
                     try:
-                        splunk_data = await self.tool_registry.call_tool(
-                            "splunk_search",
-                            {
-                                "query": f"index=* {ticket_id} error OR failed",
-                                "earliest_time": "-1h",
-                                "latest_time": "now"
-                            }
+                        # Dynamically build tool parameters based on tool type and ticket context
+                        tool_params = self._build_tool_parameters(
+                            tool_name, 
+                            ticket_id, 
+                            title, 
+                            description, 
+                            combined_text
                         )
-                        self.logger.info(f"Splunk search completed for {ticket_id}")
-                    except Exception as e:
-                        self.logger.warning(f"Splunk search failed: {e}")
-                
-                # Call NewRelic if LLM recommended it
-                if "newrelic_metrics" in tools_to_call:
-                    try:
-                        newrelic_data = await self.tool_registry.call_tool(
-                            "newrelic_metrics",
-                            {
-                                "nrql": "SELECT average(duration), average(memoryUsagePercent) FROM Transaction WHERE appName LIKE '%price%' SINCE 1 hour ago",
-                                "account_id": "default"
-                            }
-                        )
-                        self.logger.info(f"NewRelic query completed for {ticket_id}")
-                    except Exception as e:
-                        self.logger.warning(f"NewRelic query failed: {e}")
-                
-                # Call Price API if LLM recommended it
-                if "base_prices_get" in tools_to_call:
-                    try:
-                        # Extract TPNB from ticket if available
-                        import re
-                        tpnb_match = re.search(r'\b\d{8}\b', combined_text)
-                        if tpnb_match:
-                            price_data = await self.tool_registry.call_tool(
-                                "base_prices_get",
-                                {
-                                    "tpnb": tpnb_match.group(0),
-                                    "locationClusterId": "default"
-                                }
-                            )
-                            self.logger.info(f"Price API query completed for {ticket_id}")
-                    except Exception as e:
-                        self.logger.warning(f"Price API query failed: {e}")
-                
-                # Call SharePoint tools if LLM recommended them
-                if any(tool.startswith("sharepoint_") for tool in tools_to_call):
-                    try:
-                        # If search_documents is recommended
-                        if "sharepoint_search_documents" in tools_to_call:
-                            sharepoint_data = await self.tool_registry.call_tool(
-                                "sharepoint_search_documents",
-                                {
-                                    "query": f"{title} {description[:100]}",
-                                    "max_results": 5
-                                }
-                            )
-                            self.logger.info(f"SharePoint search completed for {ticket_id}")
                         
-                        # If list_files is recommended
-                        elif "sharepoint_list_files" in tools_to_call:
-                            sharepoint_data = await self.tool_registry.call_tool(
-                                "sharepoint_list_files",
-                                {
-                                    "folder_path": "Shared Documents/Runbooks",
-                                    "recursive": False
-                                }
-                            )
-                            self.logger.info(f"SharePoint list files completed for {ticket_id}")
+                        # Execute the tool
+                        result = await self.tool_registry.call_tool(tool_name, tool_params)
+                        tool_results[tool_name] = result
+                        
+                        self.logger.info(f"✓ Tool '{tool_name}' completed successfully for {ticket_id}")
+                        
                     except Exception as e:
-                        self.logger.warning(f"SharePoint operation failed: {e}")
+                        self.logger.warning(f"✗ Tool '{tool_name}' failed: {e}")
+                        tool_results[tool_name] = {"error": str(e), "success": False}
 
-            # Store analysis results
+            # Store analysis results (DYNAMIC - works with any tool results)
             analysis = {
                 "ticket_id": ticket_id,
                 "keywords": keywords,
@@ -534,28 +514,12 @@ Analyze this ticket and recommend which diagnostic tools to use."""
                 "llm_tool_recommendations": tools_to_call,
                 "similar_incidents": similar_incidents,
                 "runbook_guidance_found": bool(runbook_guidance),
-                "splunk_data": splunk_data,
-                "newrelic_data": newrelic_data,
-                "price_data": price_data,
-                "sharepoint_data": sharepoint_data,
+                "tool_results": tool_results,  # Dynamic: stores ALL tool results
                 "text_length": len(combined_text),
                 "source": source,
                 "analyzed_at": time.time(),
-                "tools_used": []
+                "tools_used": [tool for tool, result in tool_results.items() if result and not result.get("error")]
             }
-            
-            if splunk_data:
-                analysis["tools_used"].append("splunk_search")
-            if newrelic_data:
-                analysis["tools_used"].append("newrelic_metrics")
-            if price_data:
-                analysis["tools_used"].append("base_prices_get")
-            if sharepoint_data:
-                # Identify which SharePoint tool was used
-                for tool in tools_to_call:
-                    if tool.startswith("sharepoint_"):
-                        analysis["tools_used"].append(tool)
-                        break
             
             state.add_intermediate_result({
                 "step": "analyze_incident",
@@ -949,3 +913,86 @@ Analyze this ticket and recommend which diagnostic tools to use."""
             "low": 480,      # 8 hours
         }
         return timeout_map.get(severity, 120)
+    
+    def _build_tool_parameters(self, tool_name: str, ticket_id: str, title: str, description: str, combined_text: str) -> dict:
+        """
+        Dynamically build parameters for any tool based on ticket context.
+        This makes the system extensible - LLM can recommend ANY tool and we'll attempt to call it.
+        """
+        import re
+        
+        # Default parameters that work for most tools
+        params = {}
+        
+        # Tool-specific parameter builders
+        if tool_name == "splunk_search":
+            params = {
+                "query": f"index=* {ticket_id} error OR failed OR exception",
+                "earliest_time": "-1h",
+                "latest_time": "now"
+            }
+        
+        elif tool_name == "newrelic_metrics":
+            params = {
+                "nrql": "SELECT average(duration), average(memoryUsagePercent), count(*) FROM Transaction WHERE appName LIKE '%price%' SINCE 1 hour ago",
+                "account_id": "default"
+            }
+        
+        elif tool_name == "base_prices_get":
+            # Try to extract TPNB (8-digit number) from ticket
+            tpnb_match = re.search(r'\b\d{8}\b', combined_text)
+            if tpnb_match:
+                params = {
+                    "tpnb": tpnb_match.group(0),
+                    "locationClusterId": "default"
+                }
+            else:
+                params = {"tpnb": "00000000", "locationClusterId": "default"}
+        
+        elif tool_name == "competitor_prices_get":
+            tpnb_match = re.search(r'\b\d{8}\b', combined_text)
+            if tpnb_match:
+                params = {"tpnb": tpnb_match.group(0), "locationClusterIds": ["default"]}
+            else:
+                params = {"tpnb": "00000000", "locationClusterIds": ["default"]}
+        
+        elif tool_name == "basket_segment_get":
+            tpnb_match = re.search(r'\b\d{8}\b', combined_text)
+            params = {"tpnb": tpnb_match.group(0) if tpnb_match else "00000000"}
+        
+        elif tool_name == "sharepoint_search_documents":
+            params = {
+                "query": f"{title} {description[:100]}",
+                "max_results": 5
+            }
+        
+        elif tool_name == "sharepoint_list_files":
+            params = {
+                "folder_path": "Shared Documents/Runbooks",
+                "recursive": False
+            }
+        
+        elif tool_name == "sharepoint_download_file":
+            params = {
+                "file_path": "Shared Documents/Runbooks/default.md"
+            }
+        
+        elif tool_name == "poll_queue":
+            params = {
+                "queue_name": "default",
+                "limit": 10
+            }
+        
+        elif tool_name == "get_queue_stats":
+            params = {}
+        
+        else:
+            # Generic fallback for unknown tools - pass ticket context
+            params = {
+                "ticket_id": ticket_id,
+                "query": f"{title} {description[:200]}",
+                "context": "triage_analysis"
+            }
+            self.logger.info(f"Using generic parameters for unknown tool: {tool_name}")
+        
+        return params

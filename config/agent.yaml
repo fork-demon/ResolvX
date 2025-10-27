@@ -183,14 +183,16 @@ agents:
             ORG_NAME: "{ORG_NAME}"
 
     # Resource ingestion configuration (minimal)
+    # Note: Glossary and incident types are now loaded directly at agent initialization
+    # from kb/domain/ directory, not via RAG search. RAG is used only for runbooks in kb/
     resources:
       knowledge_base:
         - type: "file"
-          path: "resources/triage/incident_types.yaml"
-          description: "Incident type definitions and handling procedures"
+          path: "kb/domain/incident_types.md"
+          description: "Incident type definitions (loaded at startup, not via RAG)"
         - type: "file"
-          path: "resources/triage/glossary.yaml"
-          description: "Business domain glossary for entity extraction and disambiguation"
+          path: "kb/domain/glossary.md"
+          description: "Business domain glossary (loaded at startup, not via RAG)"
 
     # Optional per-agent MCP override (e.g., internal team MCP server)
     # mcp_gateway:

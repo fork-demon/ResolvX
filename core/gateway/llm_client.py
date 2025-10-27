@@ -219,10 +219,20 @@ class LLMGatewayClient:
 
                 # Set output data
                 if isinstance(result, ChatCompletionResponse):
+                    # Extract the actual content
+                    content = ""
+                    if result.choices:
+                        first_choice = result.choices[0]
+                        if isinstance(first_choice, dict):
+                            content = first_choice.get("message", {}).get("content", "")
+                        else:
+                            content = getattr(first_choice.message, "content", "") if hasattr(first_choice, "message") else ""
+                    
                     output_data = {
                         "success": True,
                         "model": request.model,
-                        "response_length": len(result.choices[0].get("message", {}).get("content", "")) if result.choices else 0,
+                        "content": content,
+                        "response_length": len(content),
                         "usage": result.usage,
                         "finish_reason": result.choices[0].get("finish_reason") if result.choices else None
                     }

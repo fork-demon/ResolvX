@@ -45,6 +45,30 @@ Determine the severity level based on:
 - **Information Required**: What information to include in escalation
 - **Follow-up**: Required follow-up actions
 
+## Available Diagnostic Tools
+
+Based on the incident, you can recommend the following tools to gather more information:
+
+**Log and Monitoring Tools:**
+- `splunk_search`: Search application logs for errors, exceptions, failures, stack traces
+- `newrelic_metrics`: Query performance metrics (CPU, memory, response times, throughput)
+
+**Business Data Tools:**
+- `base_prices_get`: Retrieve current price data for a product (TPNB/GTIN)
+- `competitor_prices_get`: Get competitor pricing data for comparison
+- `basket_segment_get`: Get basket segment classification for products
+- `price_minimum_calculate`: Calculate minimum price across location clusters
+- `price_minimum_get`: Get minimum price for specific location and product
+
+**Documentation Tools:**
+- `sharepoint_list_files`: List files/folders in SharePoint directory
+- `sharepoint_download_file`: Download runbooks or documentation
+- `sharepoint_search_documents`: Search for related documentation
+
+**Ticket Management:**
+- `poll_queue`: Check ticket queue status
+- `get_queue_stats`: Get queue statistics
+
 ## Output Format
 
 Provide your analysis in the following structured format:
@@ -61,8 +85,40 @@ Provide your analysis in the following structured format:
   "escalation_required": true/false,
   "escalation_level": "team/manager/executive",
   "escalation_timeline": "immediate/within 1 hour/within 4 hours",
+  "tools_to_use": ["tool_name1", "tool_name2"],
+  "tool_reasoning": "Why these specific tools are needed for investigation",
   "confidence_level": 0.0-1.0,
   "reasoning": "detailed explanation of your assessment"
+}
+```
+
+**CRITICAL REQUIREMENTS**:
+1. **ALWAYS include the `tools_to_use` array in your JSON response**
+2. **NEVER leave `tools_to_use` empty** - recommend at least 1-2 tools
+3. **Match incident type to tools**:
+   - Performance/slow response → `["splunk_search", "newrelic_metrics"]`
+   - Errors/failures → `["splunk_search"]`
+   - Pricing discrepancy → `["base_prices_get", "splunk_search"]`
+   - System issues → `["splunk_search", "newrelic_metrics"]`
+   - Unknown/unclear → `["splunk_search", "newrelic_metrics"]` (default)
+
+**Example valid response**:
+```json
+{
+  "severity_level": "High",
+  "affected_systems": ["web-server", "database"],
+  "user_impact": "Users experiencing slow response times",
+  "business_impact": "Potential revenue loss",
+  "root_cause": "Suspected database performance issue",
+  "immediate_actions": ["Check database metrics", "Review error logs"],
+  "workaround": "None available",
+  "escalation_required": true,
+  "escalation_level": "team",
+  "escalation_timeline": "within 1 hour",
+  "tools_to_use": ["splunk_search", "newrelic_metrics"],
+  "tool_reasoning": "Need to check error logs and performance metrics to identify root cause",
+  "confidence_level": 0.85,
+  "reasoning": "High severity due to user impact and business risk"
 }
 ```
 

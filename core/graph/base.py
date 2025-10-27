@@ -16,6 +16,7 @@ from core.config import AgentConfig
 from core.exceptions import AgentError
 from core.graph.state import AgentState, BaseState, WorkflowState
 from core.observability import get_logger
+from core.prompts import PromptLoader, PromptTemplate
 
 
 class BaseAgent(ABC):
@@ -54,9 +55,54 @@ class BaseAgent(ABC):
         # Internal state
         self._initialized = False
         self._graph: Optional[StateGraph] = None
+        
+        # Load prompts from configuration
+        self.prompts: Dict[str, PromptTemplate] = {}
+        self.prompt_loader = PromptLoader()
+        self._load_prompts()
 
         # Initialize the agent
         self.initialize(**kwargs)
+
+    def _load_prompts(self) -> None:
+        """Load prompts from configuration."""
+        try:
+            # Get prompt configuration from agent config
+            prompt_config = getattr(self.config, "prompts", {})
+            
+            if not prompt_config:
+                self.logger.debug(f"No prompts configured for agent {self.name}")
+                return
+            
+            # Load all configured prompts
+            self.prompts = self.prompt_loader.load_prompts_from_config(prompt_config)
+            self.logger.info(f"Loaded {len(self.prompts)} prompts for agent {self.name}")
+        
+        except Exception as e:
+            self.logger.warning(f"Error loading prompts for agent {self.name}: {e}")
+            self.prompts = {}
+    
+    def get_prompt(self, prompt_name: str, **variables) -> str:
+        """
+        Get a rendered prompt by name.
+        
+        Args:
+            prompt_name: Name of the prompt (e.g., 'system_prompt', 'incident_analysis')
+            **variables: Additional variables to inject when rendering
+            
+        Returns:
+            Rendered prompt string
+        """
+        if prompt_name not in self.prompts:
+            self.logger.warning(f"Prompt '{prompt_name}' not found for agent {self.name}")
+            return ""
+        
+        prompt = self.prompts[prompt_name]
+        return self.prompt_loader.render_prompt(prompt, **variables)
+    
+    def has_prompt(self, prompt_name: str) -> bool:
+        """Check if a prompt is loaded."""
+        return prompt_name in self.prompts
 
     def initialize(self, **kwargs: Any) -> None:
         """
