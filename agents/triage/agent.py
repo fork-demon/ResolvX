@@ -6,6 +6,7 @@ severity levels, priority, and appropriate routing decisions.
 """
 
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langgraph.graph import StateGraph, END
@@ -63,16 +64,45 @@ class TriageAgent(BaseAgent):
                         f"{len(self.domain_knowledge.incident_types)} incident types, "
                         f"{len(self.domain_knowledge.location_clusters)} location clusters")
         
-        # Auto-load LocalKB for runbooks if not provided
+        # Auto-load RAG backend for runbooks if not provided
         try:
             if self.rag is None:
-                from core.config import Config
-                # This agent doesn't have direct config object; rely on defaults
-                kb = LocalKB(knowledge_dir="kb", model_name="all-MiniLM-L6-v2")
-                kb.load()
-                self.rag = kb
-        except Exception:
-            pass
+                from core.rag.factory import create_rag_from_config
+                from core.config import load_config
+                
+                # Load RAG config from agent config
+                config = load_config()
+                
+                # Get RAG config (it's at top level, not under resources)
+                if hasattr(config, 'rag') and config.rag:
+                    rag_config = {
+                        "backend": config.rag.backend,
+                        "knowledge_dir": config.rag.knowledge_dir,
+                        "model_name": config.rag.model_name,
+                        "config": config.rag.config if hasattr(config.rag, 'config') else {}
+                    }
+                else:
+                    # Default to FAISS if not specified
+                    rag_config = {
+                        "backend": "faiss_kb",
+                        "knowledge_dir": "kb",
+                        "model_name": "all-MiniLM-L6-v2"
+                    }
+                
+                self.logger.info(f"Initializing RAG backend: {rag_config['backend']}")
+                self.rag = create_rag_from_config(rag_config)
+                
+                # Load/initialize based on backend type
+                if hasattr(self.rag, 'load'):
+                    self.rag.load()
+                    self.logger.info(f"✓ Loaded RAG backend: {rag_config['backend']}")
+                elif hasattr(self.rag, 'initialize'):
+                    import asyncio
+                    asyncio.create_task(self.rag.initialize())
+                    self.logger.info(f"✓ Initialized async RAG backend: {rag_config['backend']}")
+        except Exception as e:
+            self.logger.error(f"Failed to load RAG backend: {e}")
+            self.rag = None
         self.tracer = get_tracer("agent.triage")
         self.metrics = get_metrics_client()
         
@@ -216,19 +246,24 @@ class TriageAgent(BaseAgent):
                             # Extract runbook guidance from top result
                             if similar_incidents:
                                 for incident in similar_incidents[:2]:  # Top 2 results
-                                    runbook_guidance += f"\n### Relevant Runbook:\n{incident.get('text', '')[:1000]}\n"
+                                    incident_text = incident.get('text', '')[:2000]  # Increased from 1000 to 2000
+                                    incident_path = Path(incident.get('path', 'unknown')).name
+                                    runbook_guidance += f"\n### Relevant Runbook: {incident_path}\n{incident_text}\n"
                             
                             # Set RAG search output
                             rag_output = {
                                 "results_found": len(similar_incidents),
                                 "top_scores": [inc.get("score", 0) for inc in similar_incidents[:3]],
-                                "runbook_names": [inc.get("metadata", {}).get("source", "unknown") for inc in similar_incidents[:3]],
-                                "success": True
+                                "runbook_names": [Path(inc.get("path", "unknown")).name for inc in similar_incidents[:3]],
+                                "success": True,
+                                "runbook_guidance_length": len(runbook_guidance)
                             }
                             rag_span.set_output(rag_output)
                             rag_span.set_attribute("results_found", len(similar_incidents))
+                            rag_span.set_attribute("runbook_guidance_chars", len(runbook_guidance))
                             
                             self.logger.info(f"RAG search found {len(similar_incidents)} similar incidents")
+                            self.logger.info(f"Runbook guidance: {len(runbook_guidance)} chars extracted for LLM context")
                     except Exception as e:
                         rag_span.set_output({"success": False, "error": str(e)})
                         rag_span.record_exception(e)
@@ -281,6 +316,7 @@ Always recommend at least 1-2 diagnostic tools based on the incident type."""
                     
                     # Build user prompt with incident analysis template if available
                     if self.has_prompt("incident_analysis"):
+                        historical_context = runbook_guidance if runbook_guidance else "No historical data available"
                         user_prompt = self.get_prompt(
                             "incident_analysis",
                             INCIDENT_ID=ticket_id,
@@ -289,11 +325,12 @@ Always recommend at least 1-2 diagnostic tools based on the incident type."""
                             INCIDENT_DESCRIPTION=description[:500],
                             AFFECTED_SYSTEMS=source,
                             USER_IMPACT="Unknown",
-                            HISTORICAL_INCIDENTS=runbook_guidance if runbook_guidance else "No historical data",
+                            HISTORICAL_INCIDENTS=historical_context,
                             CURRENT_SYSTEM_STATUS="Unknown",
                             RECENT_CHANGES="Unknown",
                             ACTIVE_ALERTS="None"
                         )
+                        self.logger.info(f"LLM context includes {len(historical_context)} chars of runbook guidance")
                     else:
                         # Fallback user prompt
                         user_prompt = f"""Ticket ID: {ticket_id}

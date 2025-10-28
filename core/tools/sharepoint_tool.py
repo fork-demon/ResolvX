@@ -2,31 +2,49 @@
 SharePoint integration tools for file operations.
 
 These tools provide direct SharePoint integration for:
-- Listing files in SharePoint folders
-- Downloading files from SharePoint  
-- Uploading files to SharePoint
-- Searching SharePoint documents
+- Listing files in SharePoint folders (CSV uploads from business users)
+- Downloading files from SharePoint (CSV validation)
+- Searching SharePoint documents (verify CSV in archive)
+
+IMPORTANT: These tools should ONLY be used for:
+- Competitor promotional file processing failures
+- Basket segment file processing failures
+- Verifying if CSV moved from process/ to archive/ folder
 """
 
 from typing import Any, Dict, Optional
 from pathlib import Path
 import tempfile
+import os
 
 from core.observability import get_logger, get_tracer
 from core.gateway.tool_registry import BaseTool
 
 
 class SharePointListFilesTool(BaseTool):
-    """Tool to list files in a SharePoint folder."""
+    """
+    Tool to list CSV files in SharePoint folders.
+    
+    ONLY use for file processing failures to check:
+    - process/ folder: CSV files waiting to be processed
+    - archive/ folder: CSV files that have been successfully processed
+    """
     
     def __init__(self, site_url: Optional[str] = None, **config):
         """Initialize SharePoint list files tool."""
         self.name = "sharepoint_list_files"
-        self.description = "List files and folders in a SharePoint directory"
-        self.site_url = site_url or "https://tesco.sharepoint.com/sites/pricing"
+        self.description = "List CSV files in SharePoint process/ or archive/ folder - ONLY for file processing failures"
+        
+        # Load from environment variables (configured in .env)
+        self.site_url = site_url or os.getenv("SHAREPOINT_SITE_URL", "https://tesco.sharepoint.com/sites/pricing")
+        self.process_folder = os.getenv("SHAREPOINT_PROCESS_FOLDER", "/Shared Documents/CSV_Uploads/Process")
+        self.archive_folder = os.getenv("SHAREPOINT_ARCHIVE_FOLDER", "/Shared Documents/CSV_Uploads/Archive")
+        
         self.mock_mode = True  # Enable mock mode for local dev
         self.logger = get_logger("tools.sharepoint.list")
         self.tracer = get_tracer("tools.sharepoint.list")
+        
+        self.logger.info(f"SharePoint configured: process={self.process_folder}, archive={self.archive_folder}")
     
     def validate_parameters(self, **parameters: Any) -> bool:
         """Validate tool parameters."""

@@ -222,10 +222,11 @@ def get_base_prices(
     }
 
 
-# Uvicorn entrypoint for Docker
+# Uvicorn entrypoint (internal backend for price gateway)
 def _main():
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    # Internal backend API - only accessible from price gateway
+    uvicorn.run(app, host="127.0.0.1", port=8090)
 
 
 if __name__ == "__main__":

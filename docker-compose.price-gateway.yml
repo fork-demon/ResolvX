@@ -1,0 +1,31 @@
+version: '3.8'
+
+# Price Team Gateway - Domain-Specific Pricing Tools
+# Standalone deployment for Price Gateway only
+# Includes internal backend API (port 8090) for realistic pricing data
+
+services:
+  # Price Team Gateway (Price, Product, Location, Competitor tools)
+  price-gateway:
+    build:
+      context: ./mock_services/price_gateway
+    ports:
+      - "8082:8082"
+    environment:
+      - LOG_LEVEL=INFO
+      - PRICE_API_BASE_URL=http://127.0.0.1:8090
+      - DEBUG=false
+    networks:
+      - support-template-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  support-template-network:
+    name: support-template-network
+    driver: bridge
+

@@ -40,7 +40,7 @@ async def main():
     # MCP client + tool registry
     mcp_client = MCPClient(config)
     await mcp_client.initialize()
-    tool_registry = ToolRegistry(config.gateway, mcp_client=mcp_client)
+    tool_registry = ToolRegistry(config, mcp_client=mcp_client)  # Pass full config, not just gateway
     await tool_registry.initialize()
     print(f"  ✓ Tool Registry: {len(tool_registry.list_tools())} tools")
     

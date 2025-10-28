@@ -90,14 +90,14 @@ class ToolRegistry:
 
     def __init__(self, config: Optional[Any] = None, mcp_client: Optional[MCPClient] = None):
         """
-        Initialize tool registry.
+        Initialize tool registry with multi-gateway support.
 
         Args:
             config: Framework configuration
-            mcp_client: Optional MCP client for remote tools
+            mcp_client: Optional MCP client for remote tools (legacy, single gateway)
         """
         self.config = config
-        self.mcp_client = mcp_client
+        self.mcp_client = mcp_client  # Legacy single client
         self.logger = get_logger("tool_registry")
 
         # Tool storage
@@ -105,29 +105,131 @@ class ToolRegistry:
         self._mcp_tools: Dict[str, ToolDefinition] = {}
         self._tool_definitions: Dict[str, ToolDefinition] = {}
 
-        # Tool proxy for MCP tools
+        # Multi-gateway support: gateway_name -> MCPClient
+        self.mcp_clients: Dict[str, MCPClient] = {}
+        self.mcp_proxies: Dict[str, MCPToolProxy] = {}
+        self._tool_gateway_map: Dict[str, str] = {}  # tool_name -> gateway_name
+
+        # Legacy single gateway proxy
         self._mcp_proxy: Optional[MCPToolProxy] = None
         if mcp_client:
             self._mcp_proxy = MCPToolProxy(mcp_client)
+            self.mcp_clients["default"] = mcp_client
+            self.mcp_proxies["default"] = self._mcp_proxy
 
     async def initialize(self) -> None:
-        """Initialize the tool registry."""
+        """Initialize the tool registry with multi-gateway support."""
         try:
             # Load local tools from configuration
             await self._load_local_tools()
 
-            # Discover MCP tools
+            # Discover MCP tools from all gateways
             if self.mcp_client:
+                # Legacy single gateway
                 await self._discover_mcp_tools()
+            
+            # Initialize additional MCP gateways from config
+            self.logger.info(f"Config check: has config={self.config is not None}, has gateway={hasattr(self.config, 'gateway') if self.config else False}")
+            if self.config and hasattr(self.config, 'gateway'):
+                self.logger.info("Calling _initialize_additional_gateways()...")
+                await self._initialize_additional_gateways()
+            else:
+                self.logger.warning("Config or gateway attribute not found, skipping additional gateways")
 
+            total_mcp = sum(len(client._tools) if hasattr(client, '_tools') else 0 
+                          for client in self.mcp_clients.values())
+            
             self.logger.info(
                 f"Tool registry initialized with {len(self._local_tools)} local tools "
-                f"and {len(self._mcp_tools)} MCP tools"
+                f"and {len(self._mcp_tools)} MCP tools from {len(self.mcp_clients)} gateway(s)"
             )
 
         except Exception as e:
             self.logger.error(f"Failed to initialize tool registry: {e}")
             raise ToolError(f"Tool registry initialization failed: {e}") from e
+    
+    async def _initialize_additional_gateways(self) -> None:
+        """Initialize additional MCP gateways from configuration."""
+        gateway_config = self.config.gateway
+        
+        self.logger.info(f"Checking for additional MCP gateways in config...")
+        
+        # Check for additional_mcp_gateways in config
+        if hasattr(gateway_config, 'additional_mcp_gateways'):
+            gateways = gateway_config.additional_mcp_gateways
+            self.logger.info(f"Found {len(gateways)} additional gateway(s) in config: {list(gateways.keys())}")
+            
+            if not gateways:
+                self.logger.info("No additional gateways configured")
+                return
+            
+            for name, gw_config in gateways.items():
+                self.logger.info(f"Processing gateway '{name}': enabled={gw_config.get('enabled', True)}, url={gw_config.get('url')}")
+                
+                if gw_config.get('enabled', True) and name not in self.mcp_clients:
+                    try:
+                        # Create a mini config object for this gateway
+                        from core.config import Config, GatewayConfig
+                        mini_config = Config(
+                            gateway=GatewayConfig(
+                                mcp_gateway={
+                                    'url': gw_config.get('url'),
+                                    'timeout': gw_config.get('timeout', 30),
+                                    'retry_attempts': gw_config.get('retry_attempts', 3)
+                                }
+                            )
+                        )
+                        client = MCPClient(config=mini_config)
+                        await client.initialize()
+                        
+                        # Discover tools from this gateway
+                        tools = await client.discover_tools()
+                        
+                        # Register tools with gateway mapping
+                        new_tools_count = 0
+                        skipped_tools_count = 0
+                        
+                        for tool in tools:
+                            # Tool can be either dict or MCPTool object
+                            if hasattr(tool, 'name'):
+                                tool_name = tool.name
+                                tool_desc = tool.description if hasattr(tool, 'description') else ''
+                                tool_schema = tool.input_schema if hasattr(tool, 'input_schema') else None
+                            else:
+                                tool_name = tool.get('name')
+                                tool_desc = tool.get('description', '')
+                                tool_schema = tool.get('inputSchema')
+                            
+                            # Skip if tool already registered from another gateway
+                            if tool_name in self._tool_gateway_map:
+                                existing_gateway = self._tool_gateway_map[tool_name]
+                                self.logger.debug(f"Skipping duplicate tool '{tool_name}' from gateway '{name}' (already registered in '{existing_gateway}')")
+                                skipped_tools_count += 1
+                                continue
+                            
+                            # Register new tool
+                            self._tool_gateway_map[tool_name] = name
+                            
+                            tool_def = ToolDefinition(
+                                name=tool_name,
+                                description=tool_desc,
+                                tool_type='mcp',
+                                server=name,
+                                input_schema=tool_schema
+                            )
+                            self._mcp_tools[tool_name] = tool_def
+                            await self.register_tool(tool_def, tool_type="mcp")
+                            new_tools_count += 1
+                        
+                        self.mcp_clients[name] = client
+                        self.mcp_proxies[name] = MCPToolProxy(client)
+                        
+                        if skipped_tools_count > 0:
+                            self.logger.info(f"✓ Initialized additional MCP gateway '{name}': {gw_config.get('url')} ({new_tools_count} new tools, {skipped_tools_count} skipped duplicates)")
+                        else:
+                            self.logger.info(f"✓ Initialized additional MCP gateway '{name}': {gw_config.get('url')} ({new_tools_count} tools)")
+                    except Exception as e:
+                        self.logger.error(f"✗ Failed to initialize gateway '{name}': {e}")
 
     async def register_tool(
         self, tool: Union[BaseTool, ToolDefinition], tool_type: str = "local"
@@ -239,16 +341,26 @@ class ToolRegistry:
     async def _execute_mcp_tool(
         self, tool_name: str, parameters: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute an MCP tool."""
-        if not self._mcp_proxy:
-            raise ToolError("MCP client not available")
+        """Execute an MCP tool, routing to the correct gateway."""
+        # Determine which gateway this tool belongs to
+        gateway_name = self._tool_gateway_map.get(tool_name, "default")
+        
+        # Get the appropriate proxy
+        if gateway_name in self.mcp_proxies:
+            proxy = self.mcp_proxies[gateway_name]
+        elif self._mcp_proxy:
+            # Fallback to legacy single proxy
+            proxy = self._mcp_proxy
+        else:
+            raise ToolError(f"No MCP proxy available for tool {tool_name} (gateway: {gateway_name})")
 
-        result = await self._mcp_proxy.execute(tool_name, **parameters)
+        result = await proxy.execute(tool_name, **parameters)
 
         return {
             "tool": tool_name,
             "result": result,
             "execution_type": "mcp",
+            "gateway": gateway_name,
         }
 
     async def get_tool_schema(self, tool_name: str) -> Optional[Dict[str, Any]]:
@@ -407,7 +519,7 @@ class ToolRegistry:
             raise ToolError(f"Failed to load tool from {module_path}: {e}") from e
 
     async def _discover_mcp_tools(self) -> None:
-        """Discover tools from MCP gateway."""
+        """Discover tools from MCP gateway (default gateway)."""
         if not self.mcp_client:
             return
 
@@ -415,6 +527,9 @@ class ToolRegistry:
             mcp_tools = await self.mcp_client.discover_tools()
 
             for mcp_tool in mcp_tools:
+                # Map tool to default gateway
+                self._tool_gateway_map[mcp_tool.name] = "default"
+                
                 tool_definition = ToolDefinition(
                     name=mcp_tool.name,
                     description=mcp_tool.description,

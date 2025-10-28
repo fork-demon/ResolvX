@@ -1,0 +1,55 @@
+version: '3.8'
+
+# All MCP Gateways - Central + Price Team
+# Combined deployment for both gateways
+
+services:
+  # Central MCP Gateway (Zendesk, Splunk, New Relic, Memory)
+  central-gateway:
+    build:
+      context: ./mock_services/central_gateway
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./data/mock_tickets:/data/mock_tickets:ro
+    environment:
+      - LOG_LEVEL=INFO
+      - MOCK_TICKETS_DIR=/data/mock_tickets
+    networks:
+      - support-template-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Price Team Gateway (Price, Product, Location, Competitor tools)
+  # Includes internal backend API (port 8090) for realistic pricing data
+  price-gateway:
+    build:
+      context: ./mock_services/price_gateway
+    ports:
+      - "8082:8082"
+    environment:
+      - LOG_LEVEL=INFO
+      - PRICE_API_BASE_URL=http://127.0.0.1:8090
+      - DEBUG=false
+    networks:
+      - support-template-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  support-template-network:
+    name: support-template-network
+    driver: bridge
+
+volumes:
+  mock_tickets:
+    driver: local
+

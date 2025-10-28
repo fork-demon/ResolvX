@@ -1,254 +1,206 @@
 # Incident Type Definitions and Handling Procedures
 
-## System Availability Incidents
+## Pricing and Competitor Data Incidents
 
-### System Down
-- **Severity**: Critical
-- **Escalation Level**: Immediate
-- **Handling Team**: DevOps
-- **SLA Response**: 15 minutes
-- **SLA Resolution**: 4 hours
-
-**Description**: Complete system unavailability
-
-**Procedures**:
-1. Verify system status
-2. Check infrastructure components
-3. Notify stakeholders immediately
-4. Implement emergency procedures
-5. Document incident timeline
-
-**Tools**: splunk_search, newrelic_metrics, custom_metrics
-
-**Templates**: incident_report, escalation_notification
-
----
-
-### Service Degradation
-- **Severity**: High
-- **Escalation Level**: High
-- **Handling Team**: Engineering
-- **SLA Response**: 1 hour
-- **SLA Resolution**: 8 hours
-
-**Description**: Reduced system performance or functionality
-
-**Procedures**:
-1. Assess performance metrics
-2. Identify bottleneck components
-3. Implement temporary workarounds
-4. Notify affected users
-5. Plan permanent fix
-
-**Tools**: newrelic_metrics, splunk_search, custom_metrics
-
-**Templates**: performance_report, user_notification
-
----
-
-## Security Incidents
-
-### Security Breach
-- **Severity**: Critical
-- **Escalation Level**: Immediate
-- **Handling Team**: Security
-- **SLA Response**: 5 minutes
-- **SLA Resolution**: 2 hours
-
-**Description**: Unauthorized access or data compromise
-
-**Procedures**:
-1. Isolate affected systems
-2. Preserve evidence
-3. Notify security team immediately
-4. Activate incident response plan
-5. Coordinate with legal/compliance
-
-**Tools**: splunk_search, vault_secret_read, custom_metrics
-
-**Templates**: security_incident_report, breach_notification
-
----
-
-### Unauthorized Access
-- **Severity**: High
-- **Escalation Level**: High
-- **Handling Team**: Security
-- **SLA Response**: 30 minutes
-- **SLA Resolution**: 4 hours
-
-**Description**: Suspicious or unauthorized access attempts
-
-**Procedures**:
-1. Investigate access logs
-2. Verify user permissions
-3. Implement additional security measures
-4. Notify security team
-5. Review access controls
-
-**Tools**: splunk_search, vault_secret_read
-
-**Templates**: access_investigation_report, security_alert
-
----
-
-## Application Issues
-
-### Application Bug
-- **Severity**: Medium
+### Price Not Found (NOF Issue)
+- **Severity**: Medium  
 - **Escalation Level**: Medium
-- **Handling Team**: Engineering
-- **SLA Response**: 2 hours
-- **SLA Resolution**: 24 hours
-
-**Description**: Software defect causing unexpected behavior
-
-**Procedures**:
-1. Reproduce the issue
-2. Identify root cause
-3. Implement fix
-4. Test solution
-5. Deploy fix
-
-**Tools**: splunk_search, newrelic_metrics, database_query
-
-**Templates**: bug_report, fix_deployment
-
----
-
-### Performance Issue
-- **Severity**: Medium
-- **Escalation Level**: Medium
-- **Handling Team**: Engineering
-- **SLA Response**: 2 hours
-- **SLA Resolution**: 12 hours
-
-**Description**: Slow response times or resource constraints
-
-**Procedures**:
-1. Analyze performance metrics
-2. Identify bottlenecks
-3. Optimize code or configuration
-4. Monitor improvements
-5. Document changes
-
-**Tools**: newrelic_metrics, splunk_search, custom_metrics
-
-**Templates**: performance_analysis, optimization_report
-
----
-
-## Infrastructure Issues
-
-### Deployment Failure
-- **Severity**: High
-- **Escalation Level**: High
-- **Handling Team**: DevOps
-- **SLA Response**: 30 minutes
-- **SLA Resolution**: 2 hours
-
-**Description**: Failed application or infrastructure deployment
-
-**Procedures**:
-1. Assess deployment status
-2. Rollback if necessary
-3. Identify failure cause
-4. Fix deployment issues
-5. Redeploy successfully
-
-**Tools**: splunk_search, newrelic_metrics, custom_metrics
-
-**Templates**: deployment_report, rollback_notification
-
----
-
-### Configuration Error
-- **Severity**: Medium
-- **Escalation Level**: Medium
-- **Handling Team**: DevOps
+- **Primary Team**: Pricing Engineering  
 - **SLA Response**: 1 hour
 - **SLA Resolution**: 4 hours
 
-**Description**: Incorrect system or application configuration
+**Description**: Price missing for a GTIN in store or online.
+
+**Common Causes & Team Assignment**:
+1. **Price missing in Quote service** → Assign to **Quote Team**
+   - Price API has price but Quote doesn't
+   - Quote service errors in Splunk logs
+   
+2. **Price needs republishing** → Assign to **Adaptor Team**
+   - Price exists but in DRAFT state
+   - Price lifecycle stuck in intermediate state
+   - Adaptor logs show processing errors
+   
+3. **Product not active** → Assign to **Product Team**
+   - Product status is inactive/discontinued
+   - Product not in active catalog
+   - Product data incomplete
+   
+4. **Policy/Configuration issue** → Add **Comment** (Your Team handles)
+   - Price policy misconfigured
+   - Cluster/location mapping issue
+   - Pricing rules need adjustment
 
 **Procedures**:
-1. Identify configuration issue
-2. Correct configuration
-3. Test changes
-4. Deploy fix
-5. Verify resolution
+1. Check Price API using `base_prices_get` tool
+2. Search Splunk logs using `splunk_search` for Quote/Adaptor errors
+3. Validate product status
+4. **Decision Logic**:
+   - IF price in API but not in Quote → **Assign to Quote Team**
+   - IF price in DRAFT or needs republish → **Assign to Adaptor Team**
+   - IF product inactive → **Assign to Product Team**
+   - IF policy/config issue → **Add Comment** + keep with your team
+   - IF unclear → **Escalate to Human**
 
-**Tools**: splunk_search, vault_secret_read
+**Tools**: base_prices_get, splunk_search, poll_queue
 
-**Templates**: configuration_report, change_notification
+**Escalation Criteria**:
+- Price missing for high-volume product
+- Customer-facing impact
+- Multiple GTINs affected
+- Unable to determine root cause after tool execution
+
+**Templates**: price_validation_report, team_assignment_notification
 
 ---
 
-## User Issues
+### Incorrect Price
+- **Severity**: Medium  
+- **Escalation Level**: Medium
+- **Primary Team**: Pricing Engineering  
+- **SLA Response**: 1 hour
+- **SLA Resolution**: 4 hours
 
-### User Error
-- **Severity**: Low
-- **Escalation Level**: Low
-- **Handling Team**: Support
-- **SLA Response**: 4 hours
-- **SLA Resolution**: 48 hours
+**Description**: Price is outdated or incorrect.
 
-**Description**: User-reported issue or confusion
+**Common Causes & Team Assignment**:
+1. **Price stuck in DRAFT state** → Assign to **Adaptor Team**
+   - Price not published from draft
+   - Workflow stuck in intermediate state
+   - Adaptor processing errors
+   
+2. **Quote service has wrong price** → Assign to **Quote Team**
+   - Price API is correct but Quote is outdated
+   - Sync issues between Price API and Quote
+   - Quote service not updating
+   
+3. **Competitor pricing misaligned** → Add **Comment** (Your Team handles)
+   - Price rules need adjustment
+   - Competitive positioning decision needed
+   - Policy review required
+   
+4. **Product worksheet/lifecycle issue** → Assign to **Product Team**
+   - Product in worksheet state
+   - Lifecycle not progressed correctly
+   - Product data needs update
 
 **Procedures**:
-1. Understand user issue
-2. Provide guidance or solution
-3. Document for future reference
-4. Follow up with user
-5. Update documentation if needed
+1. Get current price using `base_prices_get` tool
+2. Check competitor prices using `competitor_prices_get` tool
+3. Search Splunk logs for errors using `splunk_search`
+4. **Decision Logic**:
+   - IF price in DRAFT state → **Assign to Adaptor Team**
+   - IF Price API correct but Quote wrong → **Assign to Quote Team**
+   - IF competitive/policy issue → **Add Comment** + keep with your team
+   - IF product lifecycle issue → **Assign to Product Team**
+   - IF unclear → **Escalate to Human**
 
-**Tools**: zendesk_ticket_create, splunk_search
+**Tools**: base_prices_get, competitor_prices_get, splunk_search
 
-**Templates**: user_support_ticket, knowledge_base_entry
+**Escalation Criteria**:
+- Price discrepancy affects revenue
+- Regulatory compliance issue
+- Customer complaints received
+- Complex multi-team coordination needed
+
+**Templates**: price_correction_report, team_assignment_notification
 
 ---
 
-### Feature Request
-- **Severity**: Low
-- **Escalation Level**: Low
-- **Handling Team**: Support
-- **SLA Response**: 24 hours
-- **SLA Resolution**: 7 days
+### Competitor Promotional File Processing Failed
+- **Severity**: Medium  
+- **Escalation Level**: Medium
+- **Handling Team**: Competitive Intelligence  
+- **SLA Response**: 2 hours
+- **SLA Resolution**: Next scheduled run
 
-**Description**: User request for new functionality
+**Description**: Failure during competitor promotional CSV file ingestion from SharePoint (business user uploads).
+
+**Common Causes**:
+- Microsoft token/authentication issue for SharePoint access
+- CSV file not processed by ingestion pipeline (check Splunk logs)
+- CSV file not moved to archive folder in SharePoint after processing
+- CSV file format or validation errors
+- Business user uploaded CSV to wrong SharePoint folder
 
 **Procedures**:
-1. Document feature request
-2. Assess feasibility
-3. Route to product team
-4. Provide user feedback
-5. Track progress
+1. Use `splunk_search` to verify if CSV file was successfully processed in a subsequent run
+2. Use `sharepoint_list_files` to check if CSV is in archive folder or still in upload folder
+3. Check Microsoft token expiration in logs
+4. Validate CSV file format if accessible
+5. If not processed after 2+ attempts:
+   - Competitive Intelligence squad refreshes token
+   - Validates CSV format
+   - Contacts business user if CSV format invalid
+   - Manually reprocesses or escalates
+6. Document processing status and retry attempts
+7. Monitor next scheduled run
 
-**Tools**: zendesk_ticket_create
+**Tools**: splunk_search, sharepoint_list_files, sharepoint_search_documents
 
-**Templates**: feature_request, product_feedback
+**Escalation Criteria**:
+- CSV file not processed after 2 retry attempts
+- Critical promotional data missing (time-sensitive)
+- CSV format validation fails repeatedly
+- Microsoft token refresh fails
+
+**Templates**: file_processing_report, business_user_notification
 
 ---
 
-## Escalation Matrix
+### Basket Segment File Processing Failed
+- **Severity**: Medium  
+- **Escalation Level**: Medium
+- **Handling Team**: Competitive Intelligence  
+- **SLA Response**: 2 hours
+- **SLA Resolution**: Next scheduled run
 
-### Critical Incidents
-- **Immediate**: Security Team Lead, DevOps Team Lead, Engineering Manager, Incident Commander
-- **Within 1 Hour**: VP of Engineering, VP of Operations, CISO
-- **Within 4 Hours**: CTO, CEO, Legal Team
+**Description**: Failure during basket segment CSV file ingestion from SharePoint (business user uploads).
 
-### High Severity
-- **Immediate**: Team Lead, Manager
-- **Within 1 Hour**: Director, VP
-- **Within 4 Hours**: C-Level
+**Common Causes**:
+- Microsoft token/authentication issue for SharePoint access
+- CSV file not processed by ingestion pipeline (check Splunk logs)
+- CSV file not moved to archive folder in SharePoint after processing
+- CSV file format or validation errors
+- Business user uploaded CSV to wrong SharePoint folder
+- CSV contains invalid TPNB or location cluster data
 
-### Medium Severity
-- **Within 1 Hour**: Team Lead
-- **Within 4 Hours**: Manager
-- **Within 24 Hours**: Director
+**Procedures**:
+1. Use `splunk_search` to verify if CSV file was successfully processed in a subsequent run
+2. Use `sharepoint_list_files` to check if CSV is in archive folder or still in upload folder
+3. Check Microsoft token expiration in logs
+4. Validate CSV file format and data if accessible
+5. Use `basket_segment_get` to verify if data is available in system (if TPNB known)
+6. If not processed after 2+ attempts:
+   - Competitive Intelligence squad refreshes token
+   - Validates CSV format and data
+   - Contacts business user if CSV invalid
+   - Manually reprocesses or escalates
+7. Document processing status and retry attempts
+8. Monitor next scheduled run
 
-### Low Severity
-- **Within 4 Hours**: Team Lead
-- **Within 24 Hours**: Manager
-- **Within 48 Hours**: Director
+**Tools**: splunk_search, basket_segment_get, sharepoint_list_files, sharepoint_search_documents
 
+**Escalation Criteria**:
+- CSV file not processed after 2 retry attempts
+- Business reporting deadline approaching
+- Multiple consecutive CSV upload failures
+- CSV format validation fails repeatedly
+
+**Templates**: file_processing_report, business_user_notification
+
+---
+
+## Additional Context
+
+These incident types are designed for pricing and competitive intelligence operations. The LLM will:
+1. **Match incident descriptions** to these types based on keywords (price, GTIN, competitor, basket segment, file processing)
+2. **Recommend appropriate tools** based on the Tools section (base_prices_get, competitor_prices_get, splunk_search, sharepoint tools)
+3. **Guide supervisor decisions** based on Procedures and Escalation Criteria
+4. **Determine severity** and escalation needs automatically
+
+The supervisor agent will use this information to:
+- Decide whether to add comments or escalate
+- Select the appropriate handling team
+- Apply correct SLA expectations
+- Choose relevant templates for communication

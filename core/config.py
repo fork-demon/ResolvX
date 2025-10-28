@@ -56,7 +56,12 @@ class ObservabilityConfig(BaseModel):
 class RAGConfig(BaseModel):
     """RAG backend configuration."""
 
-    backend: str = "llamaindex"
+    backend: str = "faiss_kb"
+    knowledge_dir: Optional[str] = "kb"
+    model_name: Optional[str] = "all-MiniLM-L6-v2"
+    config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    
+    # Legacy backend-specific configs (deprecated)
     llamaindex: Optional[Dict[str, Any]] = Field(default_factory=dict)
     langchain: Optional[Dict[str, Any]] = Field(default_factory=dict)
     local_kb: Optional[Dict[str, Any]] = Field(default_factory=dict)
@@ -65,16 +70,17 @@ class RAGConfig(BaseModel):
     @validator("backend")
     def validate_backend(cls, v: str) -> str:
         """Validate RAG backend type."""
-        allowed_backends = {"llamaindex", "langchain", "local_kb", "mock"}
+        allowed_backends = {"faiss_kb", "global_rag", "local_kb", "llamaindex", "langchain", "mock"}
         if v not in allowed_backends:
             raise ValueError(f"Backend must be one of {allowed_backends}")
         return v
 
 
 class GatewayConfig(BaseModel):
-    """Gateway configuration for MCP and LLM gateways."""
+    """Gateway configuration for MCP and LLM gateways with multi-gateway support."""
 
     mcp_gateway: Dict[str, Any] = Field(default_factory=dict)
+    additional_mcp_gateways: Dict[str, Dict[str, Any]] = Field(default_factory=dict)  # Multi-gateway support
     llm_gateway: Dict[str, Any] = Field(default_factory=dict)
     tools: Dict[str, Any] = Field(default_factory=dict)
 

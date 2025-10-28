@@ -43,24 +43,73 @@ observability:
     include_timestamps: true
 
 # RAG (Retrieval Augmented Generation) configuration
+# Supports three backends:
+# 1. faiss_kb: FAISS-based local KB (RECOMMENDED - fast, persistent, production-ready)
+# 2. global_rag: Global RAG service (API mode for centralized KB or local mode for hybrid)
+# 3. local_kb: Simple local KB (DEPRECATED - use faiss_kb instead)
 rag:
-  backend: "local_kb"  # set to local_kb to index kb/*.md in-repo
-  local_kb:
-    knowledge_dir: "kb"
-    model_name: "all-MiniLM-L6-v2"
+  backend: "faiss_kb"  # Options: faiss_kb (recommended), global_rag, local_kb (deprecated)
+  knowledge_dir: "kb"
+  model_name: "all-MiniLM-L6-v2"
+  
+  # Backend-specific configuration
+  config:
+    # FAISS KB config (used when backend=faiss_kb)
+    index_path: "./data/faiss_kb_index"
+    dimension: 384  # all-MiniLM-L6-v2
+    index_type: "IndexFlatIP"  # Inner Product for cosine similarity
+    
+    # Global RAG config (used when backend=global_rag)
+    mode: "local"  # Options: "local" (index local files), "api" (use external RAG service)
+    api_url: null  # Set to your RAG API URL when mode=api (e.g., "https://rag-service.company.com/api/v1")
+    api_key: null  # Set to your API key when mode=api (or use env var: RAG_API_KEY)
 
 # Runbook configuration - team-specific runbook management
 # runbooks removed in minimal repo
 
+# SharePoint configuration - business CSV file uploads
+sharepoint:
+  # Folder paths for CSV file processing
+  folders:
+    process: "{SHAREPOINT_PROCESS_FOLDER}"  # Where business users upload CSV files
+    archive: "{SHAREPOINT_ARCHIVE_FOLDER}"  # Where processed CSV files are moved
+  
+  # Authentication
+  auth:
+    tenant_id: "{SHAREPOINT_TENANT_ID}"
+    client_id: "{SHAREPOINT_CLIENT_ID}"
+    client_secret: "{SHAREPOINT_CLIENT_SECRET}"
+  
+  # Site configuration
+  site_url: "{SHAREPOINT_SITE_URL}"
+  
+  # File processing settings
+  file_types:
+    - "competitor_promotional"  # Competitor promotional prices CSV
+    - "basket_segment"          # Basket segment data CSV
+    - "competitor_prices"       # Regular competitor prices CSV
+
 # Gateway configuration for MCP and LLM integration
 gateway:
-  # MCP (Model Context Protocol) Gateway
+  # MCP (Model Context Protocol) Gateway - Primary
+  # Central Gateway: Operational tools (Zendesk, Splunk, New Relic, Memory)
   mcp_gateway:
-    url: "{CENTRAL_MCP_GATEWAY_URL}"
+    url: "{CENTRAL_MCP_GATEWAY_URL}"  # Default: http://localhost:8083
     timeout: 30
     retry_attempts: 3
     retry_delay: 1.0
-    fallback_mode: "local"  # Options: local, error, mock
+  
+  # Additional MCP Gateways (Multi-Gateway Support)
+  # Demonstrates real multi-gateway architecture with different tools per gateway
+  additional_mcp_gateways:
+    # Price Team Gateway - Provides Price API, Product API, Location API, Competitor data
+    # Calls price_api backend (port 8080) for realistic pricing data
+    pricing_team:
+      url: "http://localhost:8082"
+      timeout: 30
+      retry_attempts: 3
+      enabled: true
+      description: "Price Intelligence Team tools - pricing, product, location, competitor data"
 
   # LLM Gateway
   llm_gateway:
@@ -320,27 +369,7 @@ agents:
           ORG_NAME: "{ORG_NAME}"
           ENVIRONMENT: "{ENVIRONMENT}"
 
-  # Note: Splunk and NewRelic are TOOLS (via MCP gateway), not agents
-  # They are called by the Triage agent as needed based on LLM recommendations
-  # See tools: mcp_tool_splunk_search and mcp_tool_newrelic_metrics
-  
-  # splunk:
-  #   enabled: false  # Now a TOOL (mcp_tool_splunk_search), not an agent
-  #   description: "Use splunk_search tool via Triage agent's LLM-driven selection"
-  
-  # newrelic:
-  #   enabled: false  # Now a TOOL (mcp_tool_newrelic_metrics), not an agent
-  #   description: "Use newrelic_metrics tool via Triage agent's LLM-driven selection"
-
-  # metrics removed in minimal repo
-
-  # Worker Agent - executes specific tasks and workflows
-  # worker removed in minimal repo
-
-  # Coordinator Agent - coordinates between multiple agents
-  # coordinator removed in minimal repo
-
-  # Supervisor Agent - orchestrates multi-agent workflows
+ 
   supervisor:
     enabled: true
     model: "{CENTRAL_LLM_GATEWAY_URL}/v1/chat/completions"
@@ -397,9 +426,6 @@ agents:
           path: "resources/supervisor/templates/escalation_report.md"
           description: "Escalation report template"
 
-    # Optional per-agent MCP override
-    # mcp_gateway:
-    #   url: "http://localhost:9093"
 
     tools:
       - splunk_search
