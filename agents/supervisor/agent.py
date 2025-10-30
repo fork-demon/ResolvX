@@ -229,12 +229,88 @@ class SupervisorAgent(BaseAgent):
                 raise AgentError(f"Supervisor processing failed: {e}") from e
     
     def _make_final_decision(self, enriched_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Make final decision based on enriched ticket data."""
+        """
+        Make final decision based on enriched ticket data.
+        
+        Prioritizes synthesis from Triage agent if available, otherwise falls back to heuristics.
+        """
+        # Extract data
         severity = enriched_data.get("severity", "medium")
         routing = enriched_data.get("routing_decision", "unknown")
         tools_used = enriched_data.get("tools_used", [])
         
-        # Decision logic
+        # NEW: Get synthesis from Triage agent (if available)
+        analysis = enriched_data.get("analysis", {})
+        synthesis = analysis.get("synthesis", {})
+        
+        # PRIORITY 1: Use synthesis if available (Claude/ChatGPT pattern)
+        if synthesis and synthesis.get("summary"):
+            self.logger.info(f"Using synthesis from Triage agent: {synthesis.get('summary', '')[:80]}")
+            
+            # Check if synthesis recommends escalation
+            if synthesis.get("escalation_needed", False):
+                return {
+                    "action": "ESCALATE_TO_HUMAN",
+                    "reason": synthesis.get("escalation_reason", "Escalation recommended by analysis"),
+                    "escalated": True,
+                    "assigned_to": "oncall_engineer",
+                    "synthesis_summary": synthesis.get("summary"),
+                    "root_cause": synthesis.get("root_cause", "unknown"),
+                    "confidence": synthesis.get("confidence", "medium")
+                }
+            
+            # Check confidence level
+            confidence = synthesis.get("confidence", "medium")
+            root_cause = synthesis.get("root_cause", "unknown")
+            
+            # High confidence + known root cause → Add comment with recommendations
+            if confidence == "high" and root_cause != "unknown":
+                recommended_actions = synthesis.get("recommended_actions", [])
+                action_summary = ", ".join([a.get("action", "")[:50] for a in recommended_actions[:3]])
+                
+                return {
+                    "action": "ADD_COMMENT_WITH_ACTIONS",
+                    "reason": f"Root cause identified: {root_cause}. Recommended: {action_summary}",
+                    "escalated": False,
+                    "assigned_to": None,
+                    "synthesis_summary": synthesis.get("summary"),
+                    "root_cause": root_cause,
+                    "recommended_actions": recommended_actions,
+                    "confidence": confidence
+                }
+            
+            # Medium confidence or unknown root cause → Assign to team based on recommendations
+            elif recommended_actions := synthesis.get("recommended_actions", []):
+                # Extract team from high-priority actions
+                high_priority_actions = [a for a in recommended_actions if a.get("priority") == "high"]
+                if high_priority_actions:
+                    first_action = high_priority_actions[0]
+                    team = self._infer_team_from_action(first_action.get("action", ""))
+                    
+                    return {
+                        "action": "ASSIGN_TO_TEAM",
+                        "reason": f"Action required: {first_action.get('action', '')[:80]}",
+                        "escalated": False,
+                        "assigned_to": team,
+                        "synthesis_summary": synthesis.get("summary"),
+                        "root_cause": root_cause,
+                        "confidence": confidence
+                    }
+            
+            # Low confidence → Request more information
+            if confidence == "low":
+                return {
+                    "action": "REQUEST_MORE_INFO",
+                    "reason": "Analysis inconclusive - requesting additional information",
+                    "escalated": False,
+                    "assigned_to": "requester",
+                    "synthesis_summary": synthesis.get("summary"),
+                    "confidence": confidence
+                }
+        
+        # FALLBACK: Use original heuristics if no synthesis available
+        self.logger.warning("No synthesis available from Triage, using fallback heuristics")
+        
         if severity == "critical":
             return {
                 "action": "ESCALATE_TO_HUMAN",
@@ -270,6 +346,25 @@ class SupervisorAgent(BaseAgent):
                 "escalated": False,
                 "assigned_to": None
             }
+    
+    def _infer_team_from_action(self, action: str) -> str:
+        """Infer appropriate team from recommended action text."""
+        action_lower = action.lower()
+        
+        # Keyword-based team inference
+        if any(keyword in action_lower for keyword in ["azure", "connectivity", "network", "api"]):
+            return "infrastructure_team"
+        elif any(keyword in action_lower for keyword in ["splunk", "logs", "error", "exception", "timeout"]):
+            return "engineering_team"
+        elif any(keyword in action_lower for keyword in ["performance", "memory", "cpu", "thread"]):
+            return "devops_team"
+        elif any(keyword in action_lower for keyword in ["security", "auth", "permission", "access"]):
+            return "security_team"
+        elif any(keyword in action_lower for keyword in ["price", "pricing", "basket", "segment"]):
+            return "pricing_team"
+        else:
+            # Default to operations team if no match
+            return "operations_team"
 
     async def initialize(self) -> None:
         """Initialize the supervisor agent."""

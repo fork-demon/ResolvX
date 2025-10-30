@@ -176,18 +176,23 @@ async def main():
     supervisor.initialize()
     print(f"  ✓ Supervisor Agent initialized")
     
+    # Extract analysis data for supervisor
+    analysis = triage_result.get("metadata", {}).get("analysis", {}) if triage_result else {}
+    tools_used = analysis.get("tools_used", [])
+    synthesis = analysis.get("synthesis", {})
+    
     # Prepare enriched data for supervisor
     supervisor_input = {
         "ticket_id": ticket.get("id"),
-        "severity": triage_result.get("metadata", {}).get("severity", {}).get("severity", "unknown") if triage_result else "unknown",
-        "routing_decision": triage_result.get("metadata", {}).get("routing", {}).get("routing_decision", "unknown") if triage_result else "unknown",
-        "tools_used": triage_result.get("metadata", {}).get("analysis", {}).get("tools_used", []) if triage_result else [],
+        "triage_severity": triage_result.get("metadata", {}).get("severity", {}).get("severity", "unknown") if triage_result else "unknown",
+        "triage_routing": triage_result.get("metadata", {}).get("routing", {}).get("routing_decision", "unknown") if triage_result else "unknown",
+        "tools_used": tools_used,
         "enrichment_sources": {
-            "llm": bool(triage_result.get("metadata", {}).get("analysis", {}).get("llm_analysis")) if triage_result else False,
-            "splunk": bool(triage_result.get("metadata", {}).get("analysis", {}).get("splunk_data")) if triage_result else False,
-            "newrelic": bool(triage_result.get("metadata", {}).get("analysis", {}).get("newrelic_data")) if triage_result else False
+            "llm": bool(analysis.get("llm_analysis")),
+            "memory": related_count > 0,
+            "rag": bool(synthesis.get("summary"))
         },
-        "memory_action": action,
+        "analysis": analysis,  # Include full analysis with synthesis
         "ticket_data": ticket
     }
     
@@ -205,6 +210,44 @@ async def main():
         print(f"  ✓ Assigned to: {final_decision.get('assigned_to')}")
     print(f"  ✓ Escalated: {final_decision.get('escalated', False)}")
     
+    # Step 5: Executor - Execute Decision
+    print(f"\n{'='*70}")
+    print("5️⃣  EXECUTOR: Executing decision")
+    print("="*70)
+    
+    from agents.executor.agent import TicketExecutorAgent
+    executor = TicketExecutorAgent(config.agents.get("executor"))
+    print(f"  ✓ Executor Agent initialized")
+    
+    executor_state = AgentState(
+        agent_name="executor",
+        agent_type="TicketExecutorAgent",
+        input_data={
+            "ticket_id": ticket.get("id"),
+            "decision": final_decision,
+            "context": {
+                "synthesis": synthesis,
+                "tools_used": tools_used,
+                "memory_action": action,
+                "related_count": related_count,
+                "requester_id": ticket.get("requester_id"),
+                "ticket_metadata": {
+                    "priority": ticket.get("priority"),
+                    "created_at": ticket.get("created_at"),
+                    "tags": ticket.get("tags", [])
+                }
+            }
+        }
+    )
+    
+    execution_result = await executor.process(executor_state)
+    print(f"  ✓ Execution: {'SUCCESS' if execution_result.get('success') else 'FAILED'}")
+    print(f"  ✓ Action: {execution_result.get('action', 'N/A')}")
+    if execution_result.get('comment_added'):
+        print(f"  ✓ Comment added to ticket")
+    if execution_result.get('assigned_to'):
+        print(f"  ✓ Assigned to: {execution_result.get('assigned_to')}")
+    
     # Summary
     print(f"\n{'='*70}")
     print("📊 WORKFLOW SUMMARY")
@@ -212,30 +255,39 @@ async def main():
     print(f"  ✅ Poller: {ticket_count} tickets polled")
     print(f"  ✅ Memory: {action} ({related_count} related)")
     if triage_result:
-        print(f"  ✅ Triage: {severity} / {routing_decision}")
-        tools_used = triage_result.get("metadata", {}).get("analysis", {}).get("tools_used", [])
         if tools_used:
-            print(f"      Tools used: {', '.join(tools_used)}")
+            print(f"  ✅ Triage: {len(tools_used)} tools executed")
+            print(f"      → {', '.join(tools_used)}")
+        else:
+            print(f"  ✅ Triage: Analysis complete (no tools)")
+        if synthesis.get('root_cause'):
+            print(f"      → Root Cause: {synthesis.get('root_cause')}")
     else:
         print(f"  ⏭️  Triage: Skipped")
     print(f"  ✅ Supervisor: {final_decision.get('action', 'unknown')}")
     if final_decision.get('assigned_to'):
-        print(f"      Assigned to: {final_decision.get('assigned_to')}")
+        print(f"      → Assigned to: {final_decision.get('assigned_to')}")
+    print(f"  ✅ Executor: {'SUCCESS' if execution_result.get('success') else 'FAILED'}")
     
     print(f"\n{'='*70}")
     print("✅ Full Workflow Test Complete!")
     print("="*70)
     print(f"\n💡 Check LangFuse at http://localhost:3000 for traces")
-    print(f"   You should see complete end-to-end tracing:")
-    print(f"   - zendesk_poller_process (with input/output)")
-    print(f"   - memory_agent_process (with input/output)")
+    print(f"   Search for ticket: {ticket.get('id')}")
+    print(f"   You should see 5 complete agent traces:")
+    print(f"   1. zendesk_poller_process")
+    print(f"   2. memory_agent_process")
     if triage_result:
-        print(f"   - triage_process (with LLM + tools + input/output)")
-        print(f"   - llm_chat_completion (LLM analysis)")
+        print(f"   3. triage_process (with nested CoT spans)")
+        print(f"      - rag_knowledge_search")
+        print(f"      - cot_entity_extraction → llm_chat_completion")
+        print(f"      - cot_plan_creation → llm_chat_completion")
         if tools_used:
             for tool in tools_used:
-                print(f"   - mcp_tool_{tool} (enrichment)")
-    print(f"   - supervisor_process (with final decision + input/output)")
+                print(f"      - mcp_tool_{tool}")
+        print(f"      - cot_synthesis")
+    print(f"   4. supervisor_process")
+    print(f"   5. executor_process")
 
 
 if __name__ == "__main__":

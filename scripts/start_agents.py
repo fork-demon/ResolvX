@@ -149,6 +149,46 @@ class AgentManager:
             self.agents[agent_name] = agent
             return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
 
+        # Triage agent: performs CoT analysis and synthesis
+        if agent_name == "triage" and agent_config.enabled:
+            from agents.triage.agent import TriageAgent
+            from core.observability import get_tracer
+            
+            agent = TriageAgent(config=agent_config, tracer=get_tracer())
+            
+            # No continuous loop required; invoked by Supervisor
+            self.agents[agent_name] = agent
+            return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
+
+        # Supervisor agent: makes final decisions based on Triage synthesis
+        if agent_name == "supervisor" and agent_config.enabled:
+            from agents.supervisor.agent import SupervisorAgent
+            from core.observability import get_tracer
+            
+            agent = SupervisorAgent(config=agent_config, tracer=get_tracer())
+            
+            # No continuous loop required; invoked by orchestrator
+            self.agents[agent_name] = agent
+            return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
+
+        # Executor agent: executes Supervisor decisions on tickets
+        if agent_name == "executor" and agent_config.enabled:
+            from agents.executor.agent import TicketExecutorAgent
+            from core.observability import get_tracer
+            
+            # Initialize Zendesk client (or mock for dev)
+            zendesk_client = None  # TODO: Initialize real Zendesk client from config
+            
+            agent = TicketExecutorAgent(
+                config=agent_config, 
+                zendesk_client=zendesk_client,
+                tracer=get_tracer()
+            )
+            
+            # No continuous loop required; invoked by Supervisor
+            self.agents[agent_name] = agent
+            return {"name": agent_name, "type": agent_config.type, "team": agent_config.team, "status": "running"}
+
         # Default: log and return mock instance
         self.logger.info(f"Creating {agent_name} agent with type: {getattr(agent_config, 'type', 'unknown')}")
         self.logger.info(f"Team: {getattr(agent_config, 'team', 'unknown')}")

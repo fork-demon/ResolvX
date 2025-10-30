@@ -213,6 +213,20 @@ agents:
           ENVIRONMENT: "{ENVIRONMENT}"
       
       runtime_prompts:
+        # Chain-of-Thought prompts for step-by-step reasoning
+        step1_entity_extraction:
+          type: "file"
+          path: "prompts/triage/step1_entity_extraction.md"
+        
+        step2_create_plan:
+          type: "file"
+          path: "prompts/triage/step2_create_plan.md"
+        
+        step3_synthesize_results:
+          type: "file"
+          path: "prompts/triage/step3_synthesize_results.md"
+        
+        # Legacy prompts (kept for fallback)
         incident_analysis:
           type: "file"
           path: "prompts/triage/incident_analysis.md"
@@ -436,6 +450,46 @@ agents:
     confidence_threshold: 0.9
     max_iterations: 10
     timeout: 300
+
+  # Executor Agent - executes Supervisor decisions on tickets
+  executor:
+    enabled: true
+    type: "executor"
+    description: "Executes actions on tickets based on Supervisor decisions"
+    team: "operations"
+    
+    # No LLM required - this is a pure execution agent
+    # model: null
+    
+    # Retry configuration for API failures
+    max_retries: 3
+    retry_delay: 2.0
+    
+    # Team ID mappings for Zendesk assignments
+    team_mappings:
+      engineering_team: "team_eng_001"
+      devops_team: "team_devops_001"
+      security_team: "team_sec_001"
+      infrastructure_team: "team_infra_001"
+      pricing_team: "team_pricing_001"
+      operations_team: "team_ops_001"
+      oncall_engineer: "user_oncall_001"
+    
+    # Default settings
+    default_tags:
+      - "automated_analysis"
+      - "resolveX"
+    
+    bot_signature: "\n\n---\n🤖 Automated by TescoResolveX"
+    
+    # Zendesk configuration (shares with Poller)
+    zendesk:
+      auth:
+        email: "{ZENDESK_SERVICE_EMAIL}"
+        api_token: "{ZENDESK_API_TOKEN}"
+    
+    # Action timeout
+    timeout: 30
 
 # Global settings that apply across all agents
 

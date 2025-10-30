@@ -1,446 +1,575 @@
-# Support Template - Intelligent Agent Framework
+# TescoResolveX
 
-A production-ready, multi-agent framework for pricing and competitive intelligence support operations with RAG, LLM integration, and multi-gateway tool orchestration.
-
----
-
-## 🎯 What It Does
-
-### Agents & Their Roles
-
-1. **Poller Agent** - Polls Zendesk queues, forwards tickets (no analysis)
-2. **Memory Agent** - Checks for duplicate tickets, returns resolution/merge/escalate
-3. **Triage Agent** - Analyzes tickets using:
-   - Historical runbook guidance (RAG)
-   - Domain glossary (GTIN, TPNB, location clusters)
-   - LLM reasoning (Ollama llama3.2)
-   - Diagnostic tools (Splunk, Price API, SharePoint)
-4. **Supervisor Agent** - Makes final decisions (comment/assign/escalate/human-in-loop)
-
-### Key Features
-
-- ✅ **Multi-Gateway Architecture**: Central (Zendesk, Splunk, NewRelic, Memory) + Price Team (Price API, Product, Location)
-- ✅ **RAG Knowledge Base**: Semantic search over markdown runbooks (`kb/`)
-- ✅ **Domain-Aware**: Extracts pricing entities, matches incident types, recommends tools
-- ✅ **Prompt-Driven**: Configurable prompts using Jinja2 templates
-- ✅ **Evaluation & Guardrails**: Quality assessment, hallucination detection, content filtering
-- ✅ **Full Observability**: LangFuse tracing with input/output capture
-- ✅ **ReAct Pattern**: Reasoning-Action-Observation loop for decision-making
+**AI-Powered Support Automation Framework** - Multi-agent system for intelligent ticket triage, routing, and resolution with full observability.
 
 ---
 
-## 🚀 Quick Setup
+## 📋 Table of Contents
 
-### 1. Install Dependencies
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Technical Components](#technical-components)
+- [Agentic Pattern](#agentic-pattern)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Running the System](#running-the-system)
+- [Project Structure](#project-structure)
+- [Observability](#observability)
+- [Development](#development)
+- [Testing](#testing)
+
+---
+
+## 🎯 Overview
+
+**TescoResolveX** is an enterprise-grade AI agent framework designed to automate support operations by intelligently analyzing, routing, and resolving incidents. The system uses a **multi-agent architecture** powered by Large Language Models (LLMs) with built-in observability, tool orchestration, and knowledge base integration.
+
+### What This Template Does
+
+1. **Polls Support Tickets** from Zendesk queues on a schedule
+2. **Detects Duplicates** using FAISS vector memory (similarity search)
+3. **Analyzes Incidents** using Chain-of-Thought reasoning with LLMs
+4. **Executes Diagnostic Tools** via MCP (Model Context Protocol) gateways
+5. **Retrieves Knowledge Base** articles using RAG (Retrieval-Augmented Generation)
+6. **Makes Routing Decisions** with a Supervisor agent
+7. **Executes Actions** (add comments, assign teams, escalate) via Executor agent
+8. **Traces Everything** in LangFuse for debugging and monitoring
+
+---
+
+## ✨ Key Features
+
+### 🤖 Multi-Agent System
+- **5 Specialized Agents**: Poller → Memory → Triage → Supervisor → Executor
+- **LangGraph-based** state machines with retry logic and error handling
+- **Clear separation of concerns**: Analysis vs. Execution
+
+### 🧠 Chain-of-Thought (CoT) Reasoning
+- **Step 1**: Entity extraction (GTIN, TPNB, incident type, key terms)
+- **Step 2**: RAG knowledge base search for relevant runbooks
+- **Step 3**: Execution plan creation with tool selection
+- **Step 4**: Automatic parameter mapping (schema-driven, no hallucination)
+- **Step 5**: Tool execution via MCP gateways
+- **Step 6**: Synthesis - actionable summary with root cause analysis
+
+### 🔧 Tool Orchestration
+- **MCP Protocol** for microservice tool discovery
+- **Dynamic tool registry** - no hardcoding required
+- **Automatic parameter mapping** using JSON schemas
+- **13+ tools** including Splunk, Price APIs, SharePoint, NewRelic
+
+### 📚 Knowledge Base (RAG)
+- **FAISS-powered** vector search for fast KB retrieval
+- **Markdown runbooks** indexed automatically from `kb/` folder
+- **Relevance scoring** to fetch the most appropriate guidance
+
+### 🔍 Full Observability
+- **LangFuse integration** - trace every agent, LLM call, and tool execution
+- **Nested span tracking** - see the complete call hierarchy
+- **Input/output logging** - debug with full context
+- **Performance metrics** - latency, token usage, success rates
+
+### 🛡️ Production-Ready
+- **Circuit breakers** for external service failures
+- **Retry logic** with exponential backoff
+- **Health checks** for all components
+- **Async/await** architecture for high concurrency
+- **Configurable timeouts** and resource limits
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          WORKFLOW ORCHESTRATOR                      │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+          ┌─────────▼─────────┐         ┌─────────▼─────────┐
+          │  POLLER AGENT     │         │  MEMORY AGENT     │
+          │  (Zendesk)        │────────▶│  (FAISS Vector)   │
+          └───────────────────┘         └─────────┬─────────┘
+                                                  │
+                    Duplicate? ──────────────────┘
+                         │ No
+                    ┌────▼─────────────────────────────────┐
+                    │       TRIAGE AGENT (CoT)             │
+                    │  ┌─────────────────────────────────┐ │
+                    │  │ 1. Entity Extraction (LLM)      │ │
+                    │  │ 2. RAG KB Search (FAISS)        │ │
+                    │  │ 3. Plan Creation (LLM)          │ │
+                    │  │ 4. Parameter Mapping (Schema)   │ │
+                    │  │ 5. Tool Execution (MCP)         │ │
+                    │  │ 6. Synthesis (LLM)              │ │
+                    │  └─────────────────────────────────┘ │
+                    └────┬─────────────────────────────────┘
+                         │ Analysis + Synthesis
+                    ┌────▼─────────────────────────────────┐
+                    │    SUPERVISOR AGENT                  │
+                    │  - Reviews synthesis                 │
+                    │  - Makes routing decision            │
+                    │  - Determines escalation             │
+                    └────┬─────────────────────────────────┘
+                         │ Decision
+                    ┌────▼─────────────────────────────────┐
+                    │    EXECUTOR AGENT                    │
+                    │  - Add comments                      │
+                    │  - Assign to teams                   │
+                    │  - Escalate to humans                │
+                    │  - Update ticket status              │
+                    └──────────────────────────────────────┘
+                                    │
+                         ┌──────────┴──────────┐
+                         │                     │
+                    ┌────▼────┐          ┌────▼────┐
+                    │ Zendesk │          │LangFuse │
+                    │   API   │          │ Traces  │
+                    └─────────┘          └─────────┘
+```
+
+### Agent Responsibilities
+
+| Agent | Type | Purpose | Key Actions |
+|-------|------|---------|-------------|
+| **Poller** | Data Ingestion | Monitor Zendesk queues | Poll tickets, filter by priority |
+| **Memory** | Deduplication | Prevent duplicate processing | FAISS similarity search, flag duplicates |
+| **Triage** | Analysis | CoT reasoning + tool execution | Entity extraction, RAG search, plan execution, synthesis |
+| **Supervisor** | Decision | Final routing and escalation | Review synthesis, assign teams, escalate |
+| **Executor** | Action | Modify tickets in Zendesk | Add comments, assign, escalate, tag |
+
+---
+
+## 🔧 Technical Components
+
+### 1. **Core Framework** (`core/`)
+- **`config.py`**: YAML-based configuration with env variable substitution
+- **`gateway/`**: LLM client, MCP client, tool registry, parameter mapper
+- **`memory/`**: FAISS vector store, Redis adapter (optional)
+- **`observability/`**: LangFuse, LangSmith, console tracers
+- **`graph/`**: LangGraph base agent, state management
+- **`rag/`**: FAISS-based knowledge base indexing and search
+
+### 2. **Agents** (`agents/`)
+- **`poller/`**: Zendesk ticket polling with queue management
+- **`memory/`**: Duplicate detection using vector similarity
+- **`triage/`**: Main analysis agent with 6-step CoT reasoning
+- **`supervisor/`**: Decision-making agent for routing/escalation
+- **`executor/`**: Action execution agent with retry logic
+
+### 3. **MCP Gateways** (`mcp_gateway/`)
+- **Engineering tools**: Splunk, NewRelic, Prometheus
+- **Pricing tools**: Price Advisory APIs (base prices, competitor prices, basket segments)
+- **SharePoint tools**: Document search, file listing, downloads
+- **Auto-discovery**: Gateways expose tool schemas via MCP protocol
+
+### 4. **Knowledge Base** (`kb/`)
+- Markdown files for runbooks and troubleshooting guides
+- Automatically indexed by FAISS on startup
+- Queried via semantic search during triage
+
+### 5. **Configuration** (`config/`)
+- **`agent.yaml`**: Main configuration for all agents, tools, and observability
+- Supports environment variable substitution: `{VAR_NAME}`
+
+---
+
+## 🎭 Agentic Pattern
+
+### Multi-Agent Workflow Pattern
+TescoResolveX implements the **Supervisor Pattern** with specialized agents:
+
+1. **Orchestration Layer**: `WorkflowOrchestrator` coordinates agent execution
+2. **Agent Layer**: Each agent is a LangGraph state machine with defined transitions
+3. **Tool Layer**: MCP gateways provide discoverable tools
+4. **Observability Layer**: LangFuse captures all agent interactions
+
+### Chain-of-Thought (CoT) Pattern
+The Triage agent uses **multi-step reasoning** inspired by Claude/ChatGPT:
+
+```python
+# Step 1: Extract structured entities
+entities = llm.extract({
+    "gtin": "14-digit product code",
+    "tpnb": "9-digit product code",
+    "incident_type": "classification",
+    "key_terms": ["relevant", "keywords"]
+})
+
+# Step 2: Retrieve relevant knowledge
+kb_articles = rag.search(entities["key_terms"], k=1)
+
+# Step 3: Create execution plan
+plan = llm.create_plan({
+    "incident_type": entities["incident_type"],
+    "kb_guidance": kb_articles,
+    "available_tools": tool_registry.list()
+})
+
+# Step 4: Map parameters automatically (deterministic)
+payloads = parameter_mapper.map(plan["steps"], entities)
+
+# Step 5: Execute tools
+results = await execute_tools(plan["steps"], payloads)
+
+# Step 6: Synthesize findings
+synthesis = llm.synthesize({
+    "ticket": ticket,
+    "entities": entities,
+    "tool_results": results,
+    "kb_guidance": kb_articles
+})
+```
+
+### Why This Pattern?
+
+✅ **Prevents hallucination**: Schema-driven parameter mapping (Step 4)  
+✅ **Leverages domain knowledge**: RAG retrieves runbooks (Step 2)  
+✅ **Explainable**: Each step is traced independently  
+✅ **Maintainable**: Adding tools doesn't require prompt changes  
+✅ **Scalable**: Agents can run independently or in parallel  
+
+---
+
+## 🚀 Installation
+
+See **[QUICK_INSTALL.md](QUICK_INSTALL.md)** for detailed setup instructions.
+
+### Quick Start
 
 ```bash
-# Using uv (recommended)
-curl -Ls https://astral.sh/uv/install.sh | sh
-uv venv
-source .venv/bin/activate
-uv pip install -e .
+# 1. Clone repository
+git clone <repo-url>
+cd TescoResolveX
 
-# Or using pip
+# 2. Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure Environment
+# 3. Set up environment variables
+cp .env.example .env
+# Edit .env with your credentials
 
-Create `.env` file:
-
-```bash
-# Core Settings
-ORG_NAME="Price Intelligence Team"
-ENVIRONMENT="local"
-
-# Gateways
-CENTRAL_MCP_GATEWAY_URL="http://localhost:8083"
-CENTRAL_LLM_GATEWAY_URL="http://localhost:11434"
-
-# Observability (LangFuse)
-LANGFUSE_PUBLIC_KEY="pk-lf-..."
-LANGFUSE_SECRET_KEY="sk-lf-..."
-LANGFUSE_HOST="http://localhost:3000"
-
-# Mock Data
-MOCK_TICKETS_DIR="/path/to/TescoResolveX/data/mock_tickets"
-
-# SharePoint (for file processing verification)
-SHAREPOINT_SITE_URL="https://your-tenant.sharepoint.com/sites/YourSite"
-SHAREPOINT_PROCESS_FOLDER="/Shared Documents/CSV_Uploads/Process"
-SHAREPOINT_ARCHIVE_FOLDER="/Shared Documents/CSV_Uploads/Archive"
-```
-
-### 3. Start Mock Services
-
-**Terminal 1 - Central Gateway (Zendesk, Splunk, NewRelic, Memory):**
-```bash
-cd mock_services/central_gateway
-python app.py
-# Runs on http://localhost:8083
-```
-
-**Terminal 2 - Price Gateway (Price API, Product, Location, Competitor):**
-```bash
-cd mock_services/price_gateway
-bash start.sh
-# Runs on http://localhost:8082 (gateway) + http://localhost:8090 (backend)
-```
-
-**Terminal 3 - LLM (Ollama):**
-```bash
+# 4. Start Ollama (LLM)
 ollama serve
-# Runs on http://localhost:11434
-# Load model: ollama pull llama3.2
-```
 
-**Terminal 4 - LangFuse (Observability):**
-```bash
-docker compose -f docker-compose.langfuse.yml up -d
-# Access at http://localhost:3000
-```
+# 5. Start LangFuse (Observability)
+cd langfuse && docker-compose up -d
 
-### 4. Run Agents
+# 6. Initialize knowledge base
+python scripts/index_kb.py
 
-**Start all agents:**
-```bash
-python scripts/start_agents.py
-```
-
-**Run test workflow:**
-```bash
+# 7. Run full workflow test
 python scripts/test_full_workflow.py
 ```
-
----
-
-## 📁 Repository Structure
-
-```
-TescoResolveX/
-├── agents/                     # Agent implementations
-│   ├── poller/                 # Zendesk ticket poller
-│   ├── triage/                 # Incident analysis & tool orchestration
-│   ├── memory/                 # Duplicate detection (FAISS)
-│   └── supervisor/             # Final decision maker
-│
-├── config/
-│   ├── agent.yaml              # Main configuration (agents, tools, prompts)
-│   └── environments/           # Environment-specific overrides
-│
-├── core/
-│   ├── gateway/                # Tool registry, MCP clients, LLM client
-│   ├── graph/                  # LangGraph base classes
-│   ├── memory/                 # FAISS vector memory
-│   ├── observability/          # LangFuse tracer, metrics
-│   ├── rag/                    # Knowledge base (FAISS, Local KB)
-│   ├── domain/                 # Glossary & incident type loaders
-│   ├── prompts/                # Jinja2 prompt loader
-│   ├── tools/                  # SharePoint tools
-│   └── evaluation/             # Guardrails, hallucination checker, quality assessor
-│
-├── prompts/                    # Agent prompt templates (Jinja2)
-│   ├── triage/
-│   │   ├── system_prompt.md
-│   │   ├── incident_analysis.md
-│   │   └── routing_decision.md
-│   └── supervisor/
-│       └── system_prompt.md
-│
-├── kb/                         # Knowledge base (Markdown runbooks)
-│   ├── domain/                 # Glossary & incident types
-│   │   ├── glossary.md
-│   │   └── incident_types.md
-│   └── runbooks/               # Resolution procedures
-│
-├── data/
-│   ├── mock_tickets/           # Test tickets (ALERT-001 to ALERT-005)
-│   ├── faiss_memory_index/     # FAISS persistent index
-│   └── faiss_kb_index/         # Knowledge base index
-│
-├── mock_services/              # Local mock gateways
-│   ├── central_gateway/        # MCP gateway (port 8083)
-│   │   ├── app.py
-│   │   └── server.py
-│   └── price_gateway/          # Price team MCP gateway (port 8082)
-│       ├── app.py
-│       ├── server.py
-│       ├── start.sh
-│       └── backend/            # Internal price API (port 8090)
-│           └── app.py
-│
-├── scripts/
-│   ├── start_agents.py         # Start all agents
-│   └── test_full_workflow.py   # End-to-end workflow test
-│
-├── .env                        # Environment variables
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
-```
-
----
-
-## 🧪 Testing & Demo
-
-### Mock Tickets
-
-Sample tickets in `data/mock_tickets/`:
-- `ALERT-001`: Basket segments - File drop process failed
-- `ALERT-002`: Competitor promotional price - File drop process failed
-- `ALERT-003`: Investigate unexpected price move
-- `ALERT-004`: Price-Cmd-Api Memory Usage too high
-- `ALERT-005`: Price and promotions: Scanning at wrong price
-
-### Test Complete Flow
-
-```bash
-python scripts/test_full_workflow.py
-```
-
-**What it does**:
-1. Poller fetches tickets from Central Gateway
-2. Memory checks for duplicates (FAISS similarity search)
-3. Triage:
-   - Searches knowledge base (RAG) for similar incidents
-   - Sends incident + runbook context to LLM (Ollama llama3.2)
-   - LLM recommends diagnostic tools
-   - Executes tools (splunk_search, base_prices_get, sharepoint_list_files)
-   - Evaluates response (guardrails, hallucination check, quality assessment)
-4. Supervisor makes final decision (ADD_COMMENT/ASSIGN/ESCALATE)
-
-**Expected output**:
-```
-✅ Poller: 0 tickets polled
-✅ Memory: stored_current_ticket (0 related)
-✅ Triage: Tools used: splunk_search, base_prices_get
-✅ Supervisor: ADD_COMMENT
-```
-
-### Verify in LangFuse
-
-1. Open http://localhost:3000
-2. Look for traces:
-   - `zendesk_poller_process`
-   - `memory_agent_process`
-   - `triage_process` (with RAG + LLM + tools)
-   - `llm_chat_completion` (30s duration)
-   - `mcp_tool_splunk_search`
-   - `mcp_tool_base_prices_get`
-   - `supervisor_process`
 
 ---
 
 ## ⚙️ Configuration
 
-### Agent Configuration (`config/agent.yaml`)
+### Environment Variables (`.env`)
 
-**Multi-Gateway Setup:**
-```yaml
-gateway:
-  # Central Gateway (Operational tools)
-  mcp_gateway:
-    url: "http://localhost:8083"
-  
-  # Additional gateways
-  additional_mcp_gateways:
-    pricing_team:
-      url: "http://localhost:8082"
-      enabled: true
-  
-  # LLM Gateway (Ollama)
-  llm_gateway:
-    url: "http://localhost:11434"
-    default_model: "llama3.2"
+```bash
+# LLM Gateway
+CENTRAL_LLM_GATEWAY_URL=http://localhost:11434
+
+# Observability
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=http://localhost:3000
+
+# Zendesk
+ZENDESK_SUBDOMAIN=yourcompany
+ZENDESK_SERVICE_EMAIL=support@yourcompany.com
+ZENDESK_API_TOKEN=your_token
+
+# MCP Gateways
+MCP_ENGINEERING_URL=http://localhost:3001
+MCP_PRICING_URL=http://localhost:3002
 ```
 
-**Agent Prompts:**
+### Agent Configuration (`config/agent.yaml`)
+
 ```yaml
 agents:
   triage:
-    prompts:
-      system_prompt: "prompts/triage/system_prompt.md"
-      incident_analysis: "prompts/triage/incident_analysis.md"
-      routing_decision: "prompts/triage/routing_decision.md"
-    resources:
-      knowledge_base:
-        - kb/domain/glossary.md
-        - kb/domain/incident_types.md
-```
-
-**RAG Configuration:**
-```yaml
-rag:
-  backend: "faiss_kb"  # Recommended (persistent, fast)
-  knowledge_dir: "kb"
-  model_name: "all-MiniLM-L6-v2"
-  config:
-    index_path: "./data/faiss_kb_index"
-    dimension: 384
-```
-
-**Memory Configuration:**
-```yaml
-memory:
-  backend: "faiss"
-  faiss:
-    index_path: "./data/faiss_memory_index"
-    dimension: 384
-    similarity_threshold: 0.7  # 70% for duplicate detection
-```
-
----
-
-## 🏗️ Architecture Highlights
-
-### Multi-Gateway Tool Routing
-
-- **Tool Registry** discovers tools from multiple MCP gateways
-- **Dynamic Routing**: Tools routed to correct gateway based on source
-- **Duplicate Handling**: First registered gateway wins
-- **Example**:
-  ```
-  poll_queue        → Central Gateway (8083)
-  splunk_search     → Central Gateway (8083)
-  base_prices_get   → Price Gateway (8082)
-  product_info_get  → Price Gateway (8082)
-  ```
-
-### RAG Pipeline
-
-1. **Ingestion**: Markdown files in `kb/` indexed with SentenceTransformer
-2. **Search**: Semantic search using FAISS (cosine similarity)
-3. **Context Building**: Top 2 results (2000 chars each) → LLM prompt
-4. **Prompt Structure**:
-   ```
-   ## Incident Details
-   ...
-   
-   ## 📚 Historical Context & Runbook Guidance
-   [3488 chars of runbook content]
-   
-   ## Your Task
-   Use historical context to determine severity and recommend tools
-   ```
-
-### Evaluation Pipeline
-
-1. **Guardrails**: Safety checks, content filtering, policy enforcement
-2. **Hallucination Checker**: Detects factual errors, fabricated citations, speculative claims
-3. **Quality Assessor**: Evaluates completeness, relevance, clarity, actionability, technical accuracy
-
----
-
-## 🔧 Development
-
-### Adding New Tools
-
-**Local Tool (SharePoint example):**
-```python
-# core/tools/sharepoint_tool.py
-class SharePointListFilesTool(BaseTool):
-    name = "sharepoint_list_files"
-    description = "List files in SharePoint folder"
+    enabled: true
+    model: "llama3.2"
+    team: "operations"
     
-    def execute(self, folder: str = "process") -> Dict[str, Any]:
-        # Implementation
+  supervisor:
+    enabled: true
+    team: "operations"
+    
+  executor:
+    enabled: true
+    max_retries: 3
+    retry_delay: 2.0
+    team_mappings:
+      engineering_team: "team_eng_001"
+      pricing_team: "team_pricing_001"
 ```
-
-Register in `core/gateway/tool_registry.py`:
-```python
-def _load_local_tools(self):
-    from core.tools.sharepoint_tool import SharePointListFilesTool
-    self.register_tool(SharePointListFilesTool())
-```
-
-**MCP Tool:**
-Add to `mock_services/central_gateway/server.py`:
-```python
-@app.call_tool()
-async def call_tool(name: str, arguments: dict):
-    if name == "your_new_tool":
-        # Implementation
-```
-
-### Adding New Agents
-
-1. Create `agents/your_agent/agent.py`
-2. Extend `BaseAgent` from `core/graph/base.py`
-3. Implement `process()` method
-4. Add configuration to `config/agent.yaml`
-5. Add prompts to `prompts/your_agent/`
 
 ---
 
-## 📊 Observability
+## 🏃 Running the System
 
-### LangFuse Tracing
+### 1. Start Infrastructure
 
-All agents automatically traced with:
-- **Input**: Ticket data, context, parameters
-- **Output**: Decisions, tool results, reasoning
-- **Attributes**: Agent name, version, tools used, duration
-- **Metadata**: Ticket ID, severity, confidence, entities
-
-### Metrics
-
-- Agent execution time
-- Tool call latency
-- LLM token usage
-- RAG search performance
-- Memory operations
-
----
-
-## 🔐 Security & Best Practices
-
-- ✅ Environment variables for sensitive data (never hardcode)
-- ✅ Evaluation pipeline for LLM outputs
-- ✅ Circuit breakers for external services
-- ✅ Retry logic with exponential backoff
-- ✅ FAISS in-memory vector store (no external DB needed)
-- ✅ Local-first development (all services mockable)
-
----
-
-## 🆘 Troubleshooting
-
-### Issue: LLM not responding
-**Fix**: Ensure Ollama is running and model is loaded
 ```bash
+# Terminal 1: Ollama LLM
 ollama serve
-ollama pull llama3.2
+
+# Terminal 2: LangFuse
+cd langfuse && docker-compose up
+
+# Terminal 3: MCP Gateways (optional for testing)
+cd mcp_gateway && python engineering_gateway.py
 ```
 
-### Issue: Traces not appearing in LangFuse
-**Fix**: Check LangFuse connection and credentials
+### 2. Run Test Workflow
+
 ```bash
-curl http://localhost:3000/api/public/health
+# Full end-to-end test (Poller → Memory → Triage → Supervisor → Executor)
+python scripts/test_full_workflow.py
+
+# View traces in LangFuse
+open http://localhost:3000
 ```
 
-### Issue: Mock tickets not loading
-**Fix**: Set `MOCK_TICKETS_DIR` environment variable
-```bash
-export MOCK_TICKETS_DIR=/absolute/path/to/data/mock_tickets
-```
+### 3. Run Production Agents
 
-### Issue: Tools not found
-**Fix**: Verify gateways are running
 ```bash
-# Central Gateway
-curl http://localhost:8083/health
+# Start all agents
+python scripts/start_agents.py
 
-# Price Gateway
-curl http://localhost:8082/health
+# Or run individual agents
+python -m agents.poller.agent    # Polls tickets every 30 min
+python -m agents.triage.agent    # Processes from queue
+python -m agents.supervisor.agent
 ```
 
 ---
 
-## 📝 License
+## 📁 Project Structure
 
-Proprietary - Price Intelligence Team
+```
+TescoResolveX/
+├── agents/                      # Agent implementations (LangGraph)
+│   ├── poller/                  # Zendesk ticket polling
+│   ├── memory/                  # FAISS duplicate detection
+│   ├── triage/                  # CoT analysis + tool execution
+│   ├── supervisor/              # Final decision maker
+│   └── executor/                # Action executor (Zendesk API)
+├── core/
+│   ├── config/                  # Configuration management
+│   ├── gateway/
+│   │   ├── tool_registry.py     # Multi-gateway tool registry
+│   │   ├── mcp_client.py        # MCP protocol client
+│   │   ├── llm_client.py        # Ollama LLM client
+│   │   └── parameter_mapper.py  # Schema-driven parameter mapping
+│   ├── memory/                  # FAISS vector memory
+│   ├── observability/           # LangFuse, LangSmith tracers
+│   ├── rag/                     # FAISS KB indexing and search
+│   └── graph/                   # LangGraph base agent
+├── mcp_gateway/                 # MCP tool gateways
+│   ├── engineering_gateway.py   # Splunk, NewRelic tools
+│   ├── pricing_gateway.py       # Price Advisory APIs
+│   └── sharepoint_gateway.py    # SharePoint tools
+├── kb/                          # Knowledge base (runbooks)
+│   ├── basket_segments_runbook.md
+│   ├── price_missing_runbook.md
+│   └── file_drop_runbook.md
+├── prompts/                     # LLM prompts for agents
+│   ├── triage/
+│   │   ├── step1_entity_extraction.md
+│   │   ├── step2_create_plan.md
+│   │   └── step3_synthesize_results.md
+│   └── executor/
+│       └── comment_templates.md
+├── config/
+│   └── agent.yaml               # Main configuration
+├── scripts/
+│   ├── test_full_workflow.py    # End-to-end test
+│   ├── start_agents.py          # Production agent launcher
+│   └── index_kb.py              # Index knowledge base
+├── data/
+│   ├── faiss_index/             # FAISS memory indices
+│   ├── faiss_kb_index/          # FAISS KB indices
+│   └── mock_tickets/            # Test data
+├── .env                         # Environment variables
+├── requirements.txt             # Python dependencies
+├── README.md                    # This file
+└── QUICK_INSTALL.md             # Installation guide
+```
+
+---
+
+## 🔍 Observability
+
+### LangFuse Dashboard
+
+All agent executions are traced in **LangFuse** with full observability:
+
+1. **Traces View**: See all workflow executions
+2. **Agent Spans**: Nested spans for each agent
+3. **LLM Calls**: Token usage, latency, input/output
+4. **Tool Executions**: Which tools ran and their results
+5. **Error Tracking**: Failed steps with stack traces
+
+**Example Trace Hierarchy**:
+```
+workflow_execution (15.2s)
+├── zendesk_poller_process (0.5s)
+├── memory_agent_process (1.2s)
+├── triage_process (9.7s)
+│   ├── rag_knowledge_search (0.2s)
+│   ├── cot_entity_extraction (2.6s)
+│   │   └── llm_chat_completion (2.5s)
+│   ├── cot_plan_creation (6.1s)
+│   │   └── llm_chat_completion (6.0s)
+│   ├── mcp_tool_splunk_search (0.3s)
+│   ├── mcp_tool_base_prices_get (0.2s)
+│   ├── mcp_tool_sharepoint_list_files (0.1s)
+│   └── cot_synthesis (3.2s)
+│       └── llm_chat_completion (3.1s)
+├── supervisor_process (0.5s)
+└── executor_process (1.3s)
+    ├── _execute_action (0.8s)
+    ├── _validate_execution (0.3s)
+    └── _should_retry (0.2s)
+```
+
+Access: **http://localhost:3000**
+
+---
+
+## 🧪 Testing
+
+### Run Full Workflow Test
+
+```bash
+python scripts/test_full_workflow.py
+```
+
+This will:
+1. Poll mock tickets from `data/mock_tickets/`
+2. Check for duplicates in vector memory
+3. Run CoT analysis with tool execution
+4. Make supervisor decision
+5. Execute actions via executor
+6. Send traces to LangFuse
+
+### Check LangFuse
+
+Open http://localhost:3000 and search for traces. You should see:
+- `zendesk_poller_process`
+- `memory_agent_process`
+- `triage_process` (with nested CoT spans)
+- `supervisor_process`
+- `executor_process`
+
+---
+
+## 🛠️ Development
+
+### Adding a New Tool
+
+1. **Add tool to MCP gateway** (e.g., `mcp_gateway/engineering_gateway.py`):
+```python
+@app.post("/execute")
+async def execute_tool(request: ToolRequest):
+    if request.tool == "my_new_tool":
+        return {"success": True, "data": ...}
+```
+
+2. **Add JSON schema**:
+```python
+TOOL_SCHEMAS["my_new_tool"] = {
+    "name": "my_new_tool",
+    "description": "What it does",
+    "parameters": {
+        "param1": {"type": "string", "required": True},
+        "param2": {"type": "number", "required": False}
+    }
+}
+```
+
+3. **Update KB runbooks** to reference the tool:
+```markdown
+## Troubleshooting Steps
+1. Check logs: Use `my_new_tool` with param1=...
+```
+
+That's it! The tool will automatically:
+- Be discovered by the tool registry
+- Appear in plan creation prompts
+- Have parameters mapped automatically
+
+### Adding a New Runbook
+
+1. Create markdown file in `kb/`:
+```bash
+echo "# New Issue Type\n## Symptoms\n## Root Causes\n## Steps" > kb/new_issue.md
+```
+
+2. Re-index knowledge base:
+```bash
+python scripts/index_kb.py
+```
+
+The runbook will be searchable via RAG during triage.
+
+---
+
+## 📊 Key Metrics
+
+Track these in LangFuse or logs:
+
+- **Ticket Processing Time**: End-to-end latency per ticket
+- **Tool Success Rate**: % of successful tool executions
+- **LLM Token Usage**: Total tokens per analysis
+- **Escalation Rate**: % of tickets escalated to humans
+- **Duplicate Detection Rate**: % of duplicates caught
+- **Agent Retry Rate**: How often executors retry
 
 ---
 
 ## 🤝 Contributing
 
-For questions or improvements, contact the Price Intelligence Team.
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Make changes and test: `python scripts/test_full_workflow.py`
+4. Commit: `git commit -am 'Add my feature'`
+5. Push: `git push origin feature/my-feature`
+6. Create Pull Request
+
+---
+
+## 📝 License
+
+[Your License Here]
+
+---
+
+## 🙋 Support
+
+For issues or questions:
+- Check **LangFuse traces** first: http://localhost:3000
+- Review agent logs in console output
+- Open an issue on GitHub
+
+---
+
+## 🎯 Roadmap
+
+- [ ] Add support for Slack notifications
+- [ ] Implement auto-resolution for common issues
+- [ ] Add batch processing for high ticket volumes
+- [ ] Integrate with Jira for advanced workflows
+- [ ] Build self-healing capabilities (auto-retry failed actions)
+
+---
+
+**Built with ❤️ for intelligent support automation**
